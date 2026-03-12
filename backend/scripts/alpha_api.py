@@ -549,37 +549,51 @@ class AlphaHandler(BaseHTTPRequestHandler):
                     q = parse_qs(parsed.query)
                     start_date_q = (q.get('startDate') or [None])[0]
                     athlete_id = (q.get('athleteId') or ['default'])[0]
-                    
+
                     # Get start date (default to today)
                     start_date = start_date_q or date.today().isoformat()
-                    
-                    # Get athlete preferences (stubbed for alpha - will come from preferences system)
+
+                    # Use real saved athlete preferences
+                    from peakflow.preferences import get_preferences
+                    saved = _get_athlete_state(athlete_id)
+                    prefs = get_preferences(saved)
                     athlete_preferences = {
-                        'weekly_hours': 10,
-                        'primary_sport': 'cycling',
-                        'sports': ['cycling', 'running', 'yoga'],
-                        'goal': 'Build endurance and prepare for summer crits'
+                        'weekly_hours': prefs.get('weekly_hours', 10),
+                        'primary_sport': (prefs.get('sports') or ['cycling'])[0],
+                        'sports': prefs.get('sports', ['cycling']),
+                        'goal': prefs.get('goals') or 'Build endurance and consistency',
+                        'units': prefs.get('units', 'imperial'),
                     }
-                    
+
                     # Get current recovery and load
                     shell = build_alpha_shell_payload(SILVER_DIR, day=None)
                     recovery_raw = shell.get("screens", {}).get("recovery_load", {}).get("recovery", {}) if shell else {}
                     load_raw = shell.get("screens", {}).get("recovery_load", {}).get("load", {}) if shell else {}
-                    
+
+                    # Add recent workout context for prompt refinement
+                    try:
+                        icu = IntervalsClient.from_env()
+                        newest = date.today().isoformat()
+                        oldest = (date.today() - timedelta(days=14)).isoformat()
+                        recent_workouts = icu.activities(oldest, newest)
+                    except Exception:
+                        recent_workouts = []
+
                     # Generate weekly plan
                     llm = LLMClient()
                     weekly_plan = llm.generate_weekly_plan(
                         start_date=start_date,
                         athlete_preferences=athlete_preferences,
                         recovery=recovery_raw,
-                        load=load_raw
+                        load=load_raw,
+                        recent_workouts=recent_workouts,
                     )
-                    
+
                     return _json(self, HTTPStatus.OK, {
                         "ok": True,
                         "plan": weekly_plan.model_dump()
                     })
-                    
+
                 except Exception as e:
                     return _json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {
                         "ok": False,

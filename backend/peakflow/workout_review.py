@@ -212,6 +212,7 @@ def _interval_compliance(plan: Dict[str, Any], execution: Dict[str, Any]) -> Lis
     exec_watts = execution.get("weighted_avg_watts")
     exec_hr = execution.get("avg_hr")
     exec_intensity = execution.get("intensity")
+    exec_intensity_raw = execution.get("icu_intensity_raw")
 
     for i in plan.get("intervals", []):
         ttype = i.get("target_type")
@@ -229,11 +230,20 @@ def _interval_compliance(plan: Dict[str, Any], execution: Dict[str, Any]) -> Lis
             target_mid = (low + high) / 2.0
             delta = executed - target_mid
             hit = abs(delta) <= target_mid * 0.1
-        elif ttype == "power_pct_ftp" and exec_intensity is not None:
-            executed = exec_intensity
-            target_mid = (low + high) / 2.0
-            delta = executed - target_mid
-            hit = abs(delta) <= 10.0
+        elif ttype == "power_pct_ftp" and (exec_intensity_raw is not None or exec_intensity is not None):
+            # Prefer raw ICU numeric intensity when available
+            if isinstance(exec_intensity_raw, (int, float)):
+                executed = float(exec_intensity_raw)
+            elif isinstance(exec_intensity, (int, float)):
+                executed = float(exec_intensity)
+            elif isinstance(exec_intensity, str):
+                # Categorical fallback mapping
+                executed = {"easy": 55.0, "moderate": 75.0, "hard": 95.0}.get(exec_intensity.lower())
+
+            if executed is not None:
+                target_mid = (low + high) / 2.0
+                delta = executed - target_mid
+                hit = abs(delta) <= 10.0
         elif ttype == "hr_bpm" and exec_hr is not None:
             executed = exec_hr
             target_mid = (low + high) / 2.0
@@ -434,73 +444,89 @@ def evaluate_plan_execution(plan: Dict[str, Any], execution_activity: Optional[D
 def _infer_intensity(activity: Dict[str, Any]) -> str:
     """
     Infer workout intensity from sport-specific metrics.
-    Supports: cycling (power/FTP), running (pace), swimming (pace), strength (load), yoga (easy).
+    Priority:
+      1) Sport-specific objective markers (power/pace/load)
+      2) ICU raw intensity fallback (0-100 scale)
+      3) Training-load-per-hour fallback
     """
-    
+
     sport_type = (activity.get("type") or "").lower()
-    
+
     # Yoga/stretching/flexibility = always easy
     if sport_type in ("yoga", "stretching", "flexibility"):
         return "easy"
-    
-    # Cycling/VirtualRide: use power/FTP
+
+    # Cycling/VirtualRide: use weighted power / FTP
     if sport_type in ("ride", "virtualride", "cycling"):
         avg_watts = activity.get("icu_weighted_avg_watts") or activity.get("average_watts")
         ftp = activity.get("icu_ftp") or activity.get("icu_pm_ftp_watts")
-        
+
         if avg_watts and ftp and ftp > 0:
             pct_ftp = (avg_watts / ftp) * 100
             if pct_ftp < 65:
                 return "easy"
             elif pct_ftp < 85:
                 return "moderate"
-            else:
-                return "hard"
-    
-    # Running/VirtualRun: use pace vs threshold (if available)
+            return "hard"
+
+    # Running/VirtualRun: threshold-speed ratio
     if sport_type in ("run", "virtualrun", "running"):
-        avg_pace = activity.get("average_speed")  # m/s
-        threshold_pace = activity.get("icu_run_threshold_pace")  # m/s
-        
-        if avg_pace and threshold_pace and threshold_pace > 0:
-            # Slower pace = easier (inverse of power)
-            pace_ratio = threshold_pace / avg_pace
-            if pace_ratio < 0.75:  # significantly slower than threshold
+        avg_speed = activity.get("average_speed")  # m/s
+        threshold_speed = activity.get("icu_run_threshold_pace")  # often speed-equivalent in ICU exports
+
+        if avg_speed and threshold_speed and avg_speed > 0 and threshold_speed > 0:
+            ratio = avg_speed / threshold_speed
+            if ratio < 0.82:
                 return "easy"
-            elif pace_ratio < 0.95:  # near threshold
+            elif ratio < 0.97:
                 return "moderate"
-            else:  # at or above threshold
-                return "hard"
-    
-    # Swimming: use pace vs threshold (if available)
+            return "hard"
+
+    # Swimming
     if sport_type in ("swim", "swimming"):
-        avg_pace = activity.get("average_speed")  # m/s
-        threshold_pace = activity.get("icu_swim_threshold_pace")  # m/s
-        
-        if avg_pace and threshold_pace and threshold_pace > 0:
-            pace_ratio = threshold_pace / avg_pace
-            if pace_ratio < 0.80:
+        avg_speed = activity.get("average_speed")
+        threshold_speed = activity.get("icu_swim_threshold_pace")
+
+        if avg_speed and threshold_speed and avg_speed > 0 and threshold_speed > 0:
+            ratio = avg_speed / threshold_speed
+            if ratio < 0.80:
                 return "easy"
-            elif pace_ratio < 0.95:
+            elif ratio < 0.95:
                 return "moderate"
-            else:
-                return "hard"
-    
-    # Strength/WeightTraining/Workout: use training load per hour
+            return "hard"
+
+    # Strength/Workout/Crossfit
     if sport_type in ("workout", "weighttraining", "strength", "crossfit"):
         training_load = activity.get("icu_training_load")
         moving_time = activity.get("moving_time")
-        
         if training_load and moving_time and moving_time > 0:
             load_per_hour = (training_load / moving_time) * 3600
-            if load_per_hour < 40:  # lower threshold for strength
+            if load_per_hour < 35:
                 return "easy"
             elif load_per_hour < 70:
                 return "moderate"
-            else:
-                return "hard"
-    
-    # Universal fallback: use training load per hour
+            return "hard"
+
+    # Hiking/walking/ski often intensity via duration + load
+    if sport_type in ("hike", "hiking", "walk", "walking", "ski", "alpineski", "backcountryski"):
+        training_load = activity.get("icu_training_load") or 0
+        moving_time = activity.get("moving_time") or 0
+        if moving_time >= 3 * 3600 and training_load >= 120:
+            return "hard"
+        if moving_time >= 90 * 60 or training_load >= 60:
+            return "moderate"
+        return "easy"
+
+    # ICU raw intensity fallback (commonly 0-100)
+    raw_intensity = activity.get("icu_intensity")
+    if isinstance(raw_intensity, (int, float)):
+        if raw_intensity < 65:
+            return "easy"
+        elif raw_intensity < 85:
+            return "moderate"
+        return "hard"
+
+    # Universal fallback: training load per hour
     training_load = activity.get("icu_training_load")
     moving_time = activity.get("moving_time")
     if training_load and moving_time and moving_time > 0:
@@ -509,10 +535,8 @@ def _infer_intensity(activity: Dict[str, Any]) -> str:
             return "easy"
         elif load_per_hour < 80:
             return "moderate"
-        else:
-            return "hard"
-    
-    # Last resort default
+        return "hard"
+
     return "moderate"
 
 

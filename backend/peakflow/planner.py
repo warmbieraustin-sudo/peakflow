@@ -124,8 +124,27 @@ def _tp_workouts_via_script(day: str) -> List[Dict[str, Any]]:
     return _tp_workouts_range_via_script(day, day)
 
 
+def _tp_workout_type_to_sport(workout_type: Any, fallback_sport: str) -> str:
+    """Map TrainingPeaks workout type id to PeakFlow sport type."""
+    try:
+        wtype = int(workout_type) if workout_type is not None else None
+    except Exception:
+        wtype = None
+
+    mapping = {
+        2: "cycling",
+        3: "running",
+        4: "swimming",
+        5: "strength",
+        8: "hiking",
+        9: "ski",
+        10: "yoga",
+    }
+    return mapping.get(wtype, fallback_sport or "cycling")
+
+
 def _tp_workout_to_plan(workout: Dict[str, Any], fallback_sport: str) -> Dict[str, Any]:
-    sport = "cycling" if workout.get("workoutTypeValueId") in (2, None) else fallback_sport
+    sport = _tp_workout_type_to_sport(workout.get("workoutTypeValueId"), fallback_sport)
     structure = (workout.get("structure") or {}).get("structure") or []
     blocks: List[Dict[str, Any]] = []
     for item in structure:
@@ -133,11 +152,12 @@ def _tp_workout_to_plan(workout: Dict[str, Any], fallback_sport: str) -> Dict[st
             length = step.get("length") or {}
             dur = length.get("value") if length.get("unit") == "second" else None
             target = (step.get("targets") or [{}])[0]
+            target_type = "power_pct_ftp" if sport == "cycling" else ("pace" if sport in ("running", "swimming") else "rpe")
             blocks.append(
                 {
                     "label": step.get("name") or "step",
                     "duration_sec": dur or 300,
-                    "target_type": "power_pct_ftp",
+                    "target_type": target_type,
                     "target_low": target.get("minValue"),
                     "target_high": target.get("maxValue"),
                 }
@@ -774,11 +794,19 @@ def build_coach_mode_horizon(
         day = d.get("date")
         workouts = tp_days.get(day) or []
         if workouts:
+            # Keep all workouts for multi-workout day UI (bike + strength + mobility)
+            all_plans = [_tp_workout_to_plan(w, d.get("sport_type") or selected_sport) for w in workouts]
             primary_workout = _select_primary_tp_workout(workouts)
-            d["plan"] = _tp_workout_to_plan(primary_workout, d.get("sport_type") or selected_sport)
+            primary_plan = _tp_workout_to_plan(primary_workout, d.get("sport_type") or selected_sport)
+
+            d["plan"] = primary_plan
+            d["planned_workouts"] = all_plans
+            d["planned_workout_count"] = len(all_plans)
             d["plan_source"] = "trainingpeaks"
             replaced += 1
         else:
+            d["planned_workouts"] = [d.get("plan")] if d.get("plan") else []
+            d["planned_workout_count"] = len(d["planned_workouts"])
             d["plan_source"] = "peakflow_fallback"
 
     # Phase override for coach mode to avoid false deload labels from load-ratio alone.

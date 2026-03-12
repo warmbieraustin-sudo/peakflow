@@ -1,6 +1,29 @@
 const TOKEN_KEY = 'peakflow_alpha_token';
 const ADVANCED_KEY = 'peakflow_advanced_ui';
 
+// Session-memory cache (resets on page reload)
+const MEMORY_CACHE = new Map();
+
+function cacheGet(key, ttlMs = 120000) {
+  const hit = MEMORY_CACHE.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > ttlMs) {
+    MEMORY_CACHE.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function cacheSet(key, value) {
+  MEMORY_CACHE.set(key, { ts: Date.now(), value });
+}
+
+function cacheInvalidate(prefixes = []) {
+  for (const key of MEMORY_CACHE.keys()) {
+    if (prefixes.some(p => key.startsWith(p))) MEMORY_CACHE.delete(key);
+  }
+}
+
 function getToken() {
   return localStorage.getItem(TOKEN_KEY) || '';
 }
@@ -18,14 +41,22 @@ function setAdvancedUi(on) {
   localStorage.setItem(ADVANCED_KEY, on ? '1' : '0');
 }
 
-async function apiGet(path) {
+async function apiGet(path, { cacheKey = null, ttlMs = 120000, bypassCache = false } = {}) {
+  if (cacheKey && !bypassCache) {
+    const cached = cacheGet(cacheKey, ttlMs);
+    if (cached) return cached;
+  }
+
   const token = getToken();
   const headers = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const res = await fetch(path, { headers });
   const body = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, body };
+  const out = { ok: res.ok, status: res.status, body };
+
+  if (cacheKey && res.ok) cacheSet(cacheKey, out);
+  return out;
 }
 
 async function apiPost(path, data) {
@@ -39,24 +70,33 @@ async function apiPost(path, data) {
     body: JSON.stringify(data)
   });
   const body = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, body };
+  const out = { ok: res.ok, status: res.status, body };
+
+  // Invalidate affected cache groups after writes
+  if (res.ok) {
+    if (path.includes('/preferences')) cacheInvalidate(['preferences:', 'plan-horizon:', 'plan-reco:', 'llm-weekly:']);
+    if (path.includes('/llm/chat')) cacheInvalidate(['preferences:', 'plan-horizon:', 'plan-reco:']);
+  }
+
+  return out;
 }
 
 async function fetchPayload() {
-  const r = await apiGet('/api/alpha/shell/today');
+  const r = await apiGet('/api/alpha/shell/today', { cacheKey: 'shell:today', ttlMs: 60000 });
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.payload;
 }
 
 async function fetchWorkoutReview(day) {
   const qs = day ? `?day=${encodeURIComponent(day)}` : '';
-  const r = await apiGet(`/api/alpha/workout/latest${qs}`);
+  const key = `workout-review:${day || 'today'}`;
+  const r = await apiGet(`/api/alpha/workout/latest${qs}`, { cacheKey: key, ttlMs: 120000 });
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.payload;
 }
 
 async function fetchLLMDebrief() {
-  const r = await apiGet('/api/alpha/llm/debrief/today');
+  const r = await apiGet('/api/alpha/llm/debrief/today', { cacheKey: 'llm:debrief:today', ttlMs: 300000 });
   if (!r.ok) return null; // fallback to deterministic
   return r.body.debrief;
 }
@@ -67,7 +107,8 @@ async function fetchLLMWorkoutExplanation(sport, athleteId, coachMode) {
     athleteId: athleteId || 'default',
     coachMode: coachMode ? 'true' : 'false'
   });
-  const r = await apiGet(`/api/alpha/llm/explain-workout?${qs.toString()}`);
+  const key = `llm:explain:${sport || 'cycling'}:${athleteId || 'default'}:${coachMode ? '1' : '0'}`;
+  const r = await apiGet(`/api/alpha/llm/explain-workout?${qs.toString()}`, { cacheKey: key, ttlMs: 300000 });
   if (!r.ok) return null;
   return r.body.explanation;
 }
@@ -77,14 +118,19 @@ async function fetchLLMWeeklyPlan(startDate, athleteId) {
     startDate: startDate || getTodayISO(),
     athleteId: athleteId || 'default'
   });
-  const r = await apiGet(`/api/alpha/llm/weekly-plan?${qs.toString()}`);
+  const key = `llm-weekly:${startDate || getTodayISO()}:${athleteId || 'default'}`;
+  const r = await apiGet(`/api/alpha/llm/weekly-plan?${qs.toString()}`, { cacheKey: key, ttlMs: 300000 });
   if (!r.ok) return null;
   return r.body.plan;
 }
 
 async function fetchLLMAnalysis(forceRefresh = false) {
   const qs = forceRefresh ? '?refresh=true' : '';
-  const r = await apiGet(`/api/alpha/llm/analysis${qs}`);
+  const r = await apiGet(`/api/alpha/llm/analysis${qs}`, {
+    cacheKey: forceRefresh ? null : 'llm:analysis',
+    ttlMs: 180000,
+    bypassCache: forceRefresh
+  });
   if (!r.ok) return null;
   return {
     insights: r.body.insights,
@@ -94,7 +140,7 @@ async function fetchLLMAnalysis(forceRefresh = false) {
 }
 
 async function fetchTodaysWorkoutAnalysis() {
-  const r = await apiGet('/api/alpha/llm/workout-analysis/today');
+  const r = await apiGet('/api/alpha/llm/workout-analysis/today', { cacheKey: 'llm:workout-analysis:today', ttlMs: 180000 });
   if (!r.ok) return null;
   return {
     analysis: r.body.analysis,
@@ -104,7 +150,10 @@ async function fetchTodaysWorkoutAnalysis() {
 
 async function fetchPreferences() {
   const athleteId = getAthleteId();
-  const r = await apiGet(`/api/alpha/preferences?athleteId=${encodeURIComponent(athleteId)}`);
+  const r = await apiGet(`/api/alpha/preferences?athleteId=${encodeURIComponent(athleteId)}`, {
+    cacheKey: `preferences:${athleteId}`,
+    ttlMs: 300000
+  });
   if (!r.ok) return null;
   return r.body.preferences;
 }
@@ -177,39 +226,44 @@ function setAthleteId(v) {
 }
 
 async function fetchModalities() {
-  const r = await apiGet('/api/alpha/planner/modalities');
+  const r = await apiGet('/api/alpha/planner/modalities', { cacheKey: 'plan:modalities', ttlMs: 600000 });
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.modalities || [];
 }
 
 async function fetchPlannerState(athleteId) {
-  const qs = new URLSearchParams({ athleteId: athleteId || 'default' });
-  const r = await apiGet(`/api/alpha/planner/state?${qs.toString()}`);
+  const id = athleteId || 'default';
+  const qs = new URLSearchParams({ athleteId: id });
+  const r = await apiGet(`/api/alpha/planner/state?${qs.toString()}`, { cacheKey: `plan-state:${id}`, ttlMs: 120000 });
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.state || {};
 }
 
 async function fetchPlanRecommendation(sport, focusSport, athleteFeedback, coachMode, athleteId) {
+  const id = athleteId || 'default';
   const qs = new URLSearchParams({
     sport: sport || 'cycling',
     focusSport: focusSport || '',
-    athleteId: athleteId || 'default',
+    athleteId: id,
     coachMode: coachMode ? 'true' : 'false',
   });
   if (athleteFeedback) qs.set('athleteFeedback', athleteFeedback);
-  const r = await apiGet(`/api/alpha/planner/recommendation?${qs.toString()}`);
+  const key = `plan-reco:${id}:${sport || 'cycling'}:${focusSport || ''}:${coachMode ? '1' : '0'}:${athleteFeedback || ''}`;
+  const r = await apiGet(`/api/alpha/planner/recommendation?${qs.toString()}`, { cacheKey: key, ttlMs: 90000 });
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.payload;
 }
 
 async function fetchPlanHorizon(sport, focusSport, athleteId, coachMode) {
+  const id = athleteId || 'default';
   const qs = new URLSearchParams({
     sport: sport || 'cycling',
     focusSport: focusSport || '',
-    athleteId: athleteId || 'default',
+    athleteId: id,
     coachMode: coachMode ? 'true' : 'false',
   });
-  const r = await apiGet(`/api/alpha/planner/horizon?${qs.toString()}`);
+  const key = `plan-horizon:${id}:${sport || 'cycling'}:${focusSport || ''}:${coachMode ? '1' : '0'}`;
+  const r = await apiGet(`/api/alpha/planner/horizon?${qs.toString()}`, { cacheKey: key, ttlMs: 120000 });
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.payload;
 }
@@ -664,12 +718,14 @@ function renderPlan(horizon) {
     const dateParts = d.date.split('-');
     const localDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
     
-    // Get workout title (from TP if available, else generated)
-    const workoutTitle = d.plan?.title || d.planned_workout?.title || `${d.sport_type} session`;
-    const workoutBlocks = d.plan?.blocks || d.planned_workout?.blocks || [];
+    // Multi-workout support: show primary workout + additional same-day sessions
+    const dayWorkouts = (d.planned_workouts && d.planned_workouts.length) ? d.planned_workouts : [d.plan || d.planned_workout].filter(Boolean);
+    const primaryWorkout = d.plan || d.planned_workout || dayWorkouts[0] || {};
+    const workoutTitle = primaryWorkout?.title || `${d.sport_type} session`;
+    const workoutBlocks = primaryWorkout?.blocks || [];
     
     // Use duration_hours from plan (authoritative from TP), fallback to blocks
-    let durationHours = d.plan?.duration_hours || null;
+    let durationHours = primaryWorkout?.duration_hours || null;
     if (!durationHours && workoutBlocks.length > 0) {
       const totalSec = workoutBlocks.reduce((sum, b) => sum + (b.duration_sec || 0), 0);
       durationHours = totalSec / 3600;
@@ -723,6 +779,21 @@ function renderPlan(horizon) {
         ${blocksHtml ? `
           <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border, #1a1f2e);">
             ${blocksHtml}
+          </div>
+        ` : ''}
+
+        ${dayWorkouts.length > 1 ? `
+          <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border, #1a1f2e);">
+            <div class="label" style="font-size: 11px; margin-bottom: 8px;">Additional Workouts (${dayWorkouts.length - 1})</div>
+            ${dayWorkouts.slice(1).map(w => {
+              const dHours = w?.duration_hours ? `${w.duration_hours.toFixed(1)}h` : '';
+              const s = (w?.sport_type || 'session').toString();
+              return `<div style="font-size: 12px; color: var(--text-muted); padding: 4px 0;">
+                • <span style="color: var(--text-primary);">${w?.title || 'Workout'}</span>
+                <span style="text-transform: capitalize;">(${s})</span>
+                ${dHours ? `• ${dHours}` : ''}
+              </div>`;
+            }).join('')}
           </div>
         ` : ''}
         

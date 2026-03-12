@@ -183,6 +183,10 @@ class LLMCache:
             if cached_date != today:
                 return None
             
+            # Check cache schema version for compatibility
+            if int(data.get("cache_schema_version", 1)) < 2:
+                return None
+
             # Check if params changed
             if (data.get("sport") != sport or 
                 data.get("focus_sport") != focus_sport or 
@@ -208,6 +212,7 @@ class LLMCache:
         cache_file = self._cache_file("horizon", key)
         
         data = {
+            "cache_schema_version": 2,
             "date": today,
             "sport": sport,
             "focus_sport": focus_sport,

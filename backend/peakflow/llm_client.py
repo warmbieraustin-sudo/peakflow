@@ -316,11 +316,13 @@ class LLMClient:
         weekly_hours = athlete_preferences.get('weekly_hours', 10)
         primary_sport = athlete_preferences.get('primary_sport', 'cycling')
         sports = athlete_preferences.get('sports', [primary_sport])
-        goal = athlete_preferences.get('goal', 'Build endurance and consistency')
-        
+        goal = athlete_preferences.get('goal') or athlete_preferences.get('goals') or 'Build endurance and consistency'
+        units = athlete_preferences.get('units', 'imperial')
+
         prompt_parts.append(f"- Weekly training time: {weekly_hours} hours")
         prompt_parts.append(f"- Sports: {', '.join(sports)}")
         prompt_parts.append(f"- Goal: {goal}")
+        prompt_parts.append(f"- Units preference: {units}")
         
         # Current state
         prompt_parts.append("\n**Current State:**")
@@ -331,9 +333,18 @@ class LLMClient:
         
         # Recent context
         if recent_workouts:
-            prompt_parts.append(f"\n**Recent workouts:** {len(recent_workouts)} sessions in past week")
-        
+            prompt_parts.append(f"\n**Recent workouts:** {len(recent_workouts)} sessions in past 14 days")
+            sport_mix = {}
+            for w in recent_workouts:
+                s = (w.get('type') or 'unknown').lower()
+                sport_mix[s] = sport_mix.get(s, 0) + 1
+            if sport_mix:
+                mix_str = ", ".join([f"{k}:{v}" for k, v in sorted(sport_mix.items(), key=lambda x: x[1], reverse=True)])
+                prompt_parts.append(f"- Recent sport mix: {mix_str}")
+
         prompt_parts.append(f"\n**Week start date:** {start_date}")
+        prompt_parts.append("**Volume distribution rule:** Match weekly_hours within ±10% total weekly minutes.")
+        prompt_parts.append("**Progression rule:** Avoid back-to-back hard days unless one is short and sport-different.")
         
         # Schema
         prompt_parts.append("\nReturn ONLY valid JSON matching this schema:")
@@ -388,8 +399,10 @@ class LLMClient:
         prompt_parts.append("   - Running: target_type='pace', targets in min/mile or min/km")
         prompt_parts.append("   - Strength/Yoga: target_type='effort', targets as perceived effort (1-10)")
         prompt_parts.append("   - Swimming: target_type='pace', targets in min/100m")
-        prompt_parts.append("5. **Weekly volume:** Total weekly minutes should match athlete's weekly_hours × 60")
+        prompt_parts.append("5. **Weekly volume:** Total weekly minutes should match athlete's weekly_hours × 60 (±10%)")
         prompt_parts.append("6. **Rest days:** Include at least 1 complete rest day (duration_minutes=0, empty blocks[])")
+        prompt_parts.append("7. **Strength split preference:** If goal mentions split (upper/lower, push/pull/legs), reflect it across the week")
+        prompt_parts.append("8. **Day-to-day coherence:** Sequence sessions so hard days are followed by easy/recovery")
         
         return "\n".join(prompt_parts)
     
