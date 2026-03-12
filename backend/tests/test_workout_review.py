@@ -91,6 +91,35 @@ class WorkoutReviewTests(unittest.TestCase):
         self.assertIsNotNone(analysis["score"])
         self.assertIn("DURATION_ONLY_MATCH", analysis["reason_codes"])
 
+    def test_stream_window_matching(self):
+        plan = {
+            "source": "llm",
+            "title": "2x5 threshold",
+            "planned_duration_sec": 600,
+            "intervals": [
+                {"label": "work1", "type": "work", "duration_sec": 300, "target_type": "power_pct_ftp", "target_low": 90, "target_high": 95},
+                {"label": "work2", "type": "work", "duration_sec": 300, "target_type": "power_pct_ftp", "target_low": 90, "target_high": 95},
+            ],
+        }
+        execution = {
+            "moving_time_sec": 600,
+            "weighted_avg_watts": 240,
+            "avg_hr": 150,
+            "intensity": 92,
+            "ftp": 250,
+        }
+        streams = [
+            {"type": "time", "data": list(range(600))},
+            {"type": "watts", "data": [230] * 300 + [240] * 300},
+            {"type": "heartrate", "data": [145] * 300 + [152] * 300},
+        ]
+
+        analysis = evaluate_plan_execution(plan, execution, streams=streams)
+        self.assertEqual(analysis["matching_tier"], "power_hr")
+        self.assertIn("STREAM_WINDOW_MATCH", analysis["reason_codes"])
+        self.assertEqual(len(analysis["intervals"]), 2)
+        self.assertIn(analysis["interval_matching"], ["matched", "partial", "missed"])
+
 
 if __name__ == "__main__":
     unittest.main()

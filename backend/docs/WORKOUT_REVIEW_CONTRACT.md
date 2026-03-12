@@ -88,6 +88,13 @@ LLM/TP interval schema:
 - `duration_only`: non-data-rich user baseline
 - `none`: no execution signals
 
+## Day 20 upgrade
+- Preferred path now uses **stream-window matching**:
+  - pull ICU streams (`/activity/{id}/streams`)
+  - map cumulative planned interval durations to execution windows
+  - compute per-window `avg_watts`, `np_proxy`, `avg_hr`, hit/miss
+- Falls back to session-level matching when streams unavailable.
+
 ## Access
 - Script: `scripts/latest_workout_review.py --day YYYY-MM-DD`
 - Alpha API: `GET /api/alpha/workout/latest?day=YYYY-MM-DD`

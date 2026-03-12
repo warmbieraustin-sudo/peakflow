@@ -184,7 +184,7 @@ def _duration_score(plan: Dict[str, Any], execution: Dict[str, Any]) -> float:
 
 
 def _interval_compliance(plan: Dict[str, Any], execution: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Session-level prototype: compare interval targets against available session metrics."""
+    """Session-level fallback: compare interval targets against session metrics."""
     out: List[Dict[str, Any]] = []
     exec_watts = execution.get("weighted_avg_watts")
     exec_hr = execution.get("avg_hr")
@@ -227,13 +227,113 @@ def _interval_compliance(plan: Dict[str, Any], execution: Dict[str, Any]) -> Lis
                     "executed": round(float(executed), 1),
                     "delta": round(float(delta), 1) if delta is not None else None,
                     "hit": bool(hit),
+                    "source": "session",
                 }
             )
 
     return out
 
 
-def evaluate_plan_execution(plan: Dict[str, Any], execution_activity: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _stream_map(streams: List[Dict[str, Any]]) -> Dict[str, List[Any]]:
+    out: Dict[str, List[Any]] = {}
+    for s in streams or []:
+        st = s.get("type")
+        if st:
+            out[st] = s.get("data") or []
+    return out
+
+
+def _window_mean(values: List[Any], start_idx: int, end_idx: int) -> Optional[float]:
+    window = [v for v in values[start_idx:end_idx] if isinstance(v, (int, float))]
+    if not window:
+        return None
+    return sum(window) / float(len(window))
+
+
+def _window_np_proxy(watts: List[Any], start_idx: int, end_idx: int) -> Optional[float]:
+    window = [v for v in watts[start_idx:end_idx] if isinstance(v, (int, float))]
+    if not window:
+        return None
+    return (sum((float(v) ** 4 for v in window)) / float(len(window))) ** 0.25
+
+
+def _interval_compliance_streams(plan: Dict[str, Any], execution: Dict[str, Any], streams: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    smap = _stream_map(streams)
+    t = smap.get("time") or []
+    watts = smap.get("watts") or []
+    hr = smap.get("heartrate") or []
+    if not t:
+        return []
+
+    # assume 1Hz arrays indexed by second; use cumulative planned durations for windows
+    rows: List[Dict[str, Any]] = []
+    cursor = 0
+    ftp = execution.get("ftp")
+
+    for i in plan.get("intervals", []):
+        dur = i.get("duration_sec")
+        if not isinstance(dur, (int, float)) or dur <= 0:
+            continue
+        start_idx = int(cursor)
+        end_idx = int(cursor + dur)
+        cursor = end_idx
+
+        if start_idx >= len(t):
+            break
+        end_idx = min(end_idx, len(t))
+        if end_idx <= start_idx:
+            continue
+
+        avg_w = _window_mean(watts, start_idx, end_idx) if watts else None
+        np_proxy = _window_np_proxy(watts, start_idx, end_idx) if watts else None
+        avg_hr = _window_mean(hr, start_idx, end_idx) if hr else None
+
+        ttype = i.get("target_type")
+        low = i.get("target_low")
+        high = i.get("target_high") or low
+        executed = None
+        delta = None
+        hit = None
+
+        if low is not None:
+            if ttype == "power_watts" and avg_w is not None:
+                executed = avg_w
+                target_mid = (low + high) / 2.0
+                delta = executed - target_mid
+                hit = abs(delta) <= target_mid * 0.1
+            elif ttype == "power_pct_ftp" and avg_w is not None and ftp:
+                executed = (avg_w / float(ftp)) * 100.0
+                target_mid = (low + high) / 2.0
+                delta = executed - target_mid
+                hit = abs(delta) <= 10.0
+            elif ttype == "hr_bpm" and avg_hr is not None:
+                executed = avg_hr
+                target_mid = (low + high) / 2.0
+                delta = executed - target_mid
+                hit = abs(delta) <= 8.0
+
+        rows.append(
+            {
+                "label": i.get("label"),
+                "target_type": ttype,
+                "target_low": low,
+                "target_high": high,
+                "executed": round(float(executed), 1) if executed is not None else None,
+                "delta": round(float(delta), 1) if delta is not None else None,
+                "hit": bool(hit) if hit is not None else None,
+                "avg_watts": round(float(avg_w), 1) if avg_w is not None else None,
+                "np_proxy": round(float(np_proxy), 1) if np_proxy is not None else None,
+                "avg_hr": round(float(avg_hr), 1) if avg_hr is not None else None,
+                "window_start_sec": start_idx,
+                "window_end_sec": end_idx,
+                "source": "stream_window",
+            }
+        )
+
+    return rows
+
+
+def evaluate_plan_execution(plan: Dict[str, Any], execution_activity: Optional[Dict[str, Any]], streams: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     normalized = _normalize_plan(plan)
     reason_codes: List[str] = []
 
@@ -249,12 +349,21 @@ def evaluate_plan_execution(plan: Dict[str, Any], execution_activity: Optional[D
 
     tier = _choose_matching_tier(normalized, execution_activity)
     duration = _duration_score(normalized, execution_activity)
-    interval_rows = _interval_compliance(normalized, execution_activity)
 
-    interval_score = None
+    # Prefer stream-window interval matching when streams are present.
+    interval_rows = _interval_compliance_streams(normalized, execution_activity, streams or [])
     if interval_rows:
-        hits = sum(1 for r in interval_rows if r.get("hit"))
-        interval_score = hits / float(len(interval_rows))
+        reason_codes.append("STREAM_WINDOW_MATCH")
+    else:
+        interval_rows = _interval_compliance(normalized, execution_activity)
+        if interval_rows:
+            reason_codes.append("SESSION_LEVEL_FALLBACK_MATCH")
+
+    interval_hits = [r for r in interval_rows if r.get("hit") is not None]
+    interval_score = None
+    if interval_hits:
+        hits = sum(1 for r in interval_hits if r.get("hit"))
+        interval_score = hits / float(len(interval_hits))
     else:
         reason_codes.append("NO_COMPARABLE_INTERVAL_TARGETS")
 
@@ -263,9 +372,8 @@ def evaluate_plan_execution(plan: Dict[str, Any], execution_activity: Optional[D
             score = duration * 0.6
             confidence = "medium"
         else:
-            score = 0.65 * interval_score + 0.35 * duration
+            score = 0.7 * interval_score + 0.3 * duration
             confidence = "high"
-            reason_codes.append("SESSION_LEVEL_POWER_MATCH")
     elif tier == "hr_only":
         if interval_score is None:
             score = duration * 0.7
@@ -342,6 +450,7 @@ def build_latest_workout_review(day: str | None = None) -> Dict[str, Any]:
         "status": "ok" if latest else "empty",
         "activity": None,
     }
+    streams: List[Dict[str, Any]] = []
 
     if latest:
         execution["activity"] = {
@@ -356,7 +465,12 @@ def build_latest_workout_review(day: str | None = None) -> Dict[str, Any]:
             "intensity": latest.get("icu_intensity"),
             "decoupling": latest.get("decoupling"),
             "calories": latest.get("calories"),
+            "ftp": latest.get("icu_ftp") or latest.get("icu_pm_ftp_watts"),
         }
+        try:
+            streams = icu.activity_streams(str(latest.get("id")))
+        except Exception:
+            streams = []
 
     plan = {
         "source": "trainingpeaks",
@@ -365,7 +479,7 @@ def build_latest_workout_review(day: str | None = None) -> Dict[str, Any]:
         "planned_tss": tp_data.get("planned_tss"),
         "intervals": tp_data.get("intervals", []),
     }
-    analysis = evaluate_plan_execution(plan, execution.get("activity"))
+    analysis = evaluate_plan_execution(plan, execution.get("activity"), streams=streams)
 
     return {
         "date": target_day,

@@ -64,6 +64,10 @@ class IntervalsClient:
             {"oldest": oldest, "newest": newest},
         )
 
+    def activity_streams(self, activity_id: str) -> List[Dict[str, Any]]:
+        # Intervals stream endpoint is activity-scoped (not athlete-scoped).
+        return self._get(f"/activity/{activity_id}/streams")
+
 
 def normalize_wellness(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
