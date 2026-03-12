@@ -112,3 +112,20 @@ PYTHONPATH=. python3 scripts/pwa_payload.py --write
 ```
 
 Contract doc: `backend/docs/ALPHA_UI_CONTRACT.md`
+
+## Alpha API + shell routes (Day 15)
+```bash
+cd backend
+PYTHONPATH=. python3 scripts/alpha_api.py
+```
+
+Default endpoints:
+- `GET /api/health`
+- `GET /api/alpha/routes`
+- `GET /api/alpha/shell/today`
+- `GET /api/alpha/shell/YYYY-MM-DD`
+
+Frontend route skeleton (served by same process):
+- `/` (Morning Brief)
+- `#/recovery`
+- `#/chat`
