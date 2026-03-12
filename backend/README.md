@@ -116,6 +116,7 @@ Workout review contract: `backend/docs/WORKOUT_REVIEW_CONTRACT.md` (includes LLM
 Beta onboarding checklist: `backend/docs/BETA_ONBOARDING_CHECKLIST.md`
 Alpha success metrics: `backend/docs/ALPHA_SUCCESS_METRICS.md`
 Beta cohort invite flow: `backend/docs/BETA_COHORT_INVITE_FLOW.md`
+Beta kickoff cadence: `backend/docs/BETA_KICKOFF_CADENCE.md`
 
 ## Alpha API + shell routes (Day 15/16)
 ```bash
