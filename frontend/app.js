@@ -223,6 +223,7 @@ function renderWorkoutGraph(blocks) {
         flex-direction: column;
         justify-content: flex-end;
         align-items: center;
+        height: 100%;
         min-width: 0;
       " title="${b.label}: ${formatDuration(b.duration_sec)} @ ${targetRange}">
         <div style="
