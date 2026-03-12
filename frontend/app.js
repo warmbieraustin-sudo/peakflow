@@ -374,8 +374,68 @@ function renderRecovery(p, review) {
   `;
 }
 
-function renderChat() {
-  return `<div class="card"><div class="value">Chat UI coming soon.</div><div class="muted">For now, use planner + review tabs.</div></div>`;
+function renderTodayWorkout(modalities, recommendation) {
+  const options = modalities
+    .map((m) => `<option value="${m}" ${m === recommendation.selected_sport ? 'selected' : ''}>${m}</option>`)
+    .join('');
+
+  const workoutBlocks = recommendation.plan?.blocks || [];
+  const workoutGraph = renderWorkoutGraph(workoutBlocks);
+  const workoutDetails = renderWorkoutBlocks(workoutBlocks);
+
+  const fb = getAthleteFeedback();
+  const coachMode = getCoachMode();
+  const advanced = isAdvancedUi();
+
+  return `
+    <div class="card">
+      ${advanced ? `<div class="label">Athlete ID</div>
+      <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+        <input id="athleteIdInput" value="${getAthleteId()}" placeholder="athlete id" style="flex: 1;" />
+        <button id="applyAthleteBtn">Load</button>
+      </div>` : ''}
+      <div class="label">Today's Activity</div>
+      <div style="display: flex; gap: 8px; align-items: center; margin: 8px 0 16px 0;">
+        <select id="sportSelect" style="flex: 1;">${options}</select>
+        <button id="applySportBtn">Apply</button>
+      </div>
+      <div style="margin-bottom: 16px;">
+        <label class="muted" style="display: flex; align-items: center; gap: 6px;">
+          <input id="coachModeToggle" type="checkbox" ${coachMode ? 'checked' : ''}/> 
+          Coach Mode (TP-first)
+        </label>
+      </div>
+      <div style="margin-bottom: 16px;">
+        <div class="label" style="margin-bottom: 8px;">How did yesterday feel?</div>
+        <div style="display: flex; gap: 8px;">
+          <button id="fbEasyBtn" style="flex: 1;" ${fb === 'easy' ? 'disabled' : ''}>Too Easy</button>
+          <button id="fbOkBtn" style="flex: 1;" ${fb === 'ok' ? 'disabled' : ''}>About Right</button>
+          <button id="fbHardBtn" style="flex: 1;" ${fb === 'hard' ? 'disabled' : ''}>Too Hard</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label">Recommended Session</div>
+      <div class="value" style="margin-bottom: 12px;">${recommendation.plan?.title || '—'}</div>
+      ${advanced ? `<div class="muted" style="margin-bottom: 8px;">sport: ${recommendation.plan?.sport_type || '—'} • schema: ${recommendation.plan?.schema_version || '—'}</div>` : ''}
+      ${workoutBlocks.length > 0 ? `${workoutGraph}<div style="margin-top: 8px;">${workoutDetails}</div>` : '<div class="muted">No interval structure available</div>'}
+    </div>
+
+    <div class="card">
+      <div class="label">Why This</div>
+      <div class="muted" style="line-height: 1.6;">${recommendation.coach_explanation?.summary || 'Adaptive recommendation based on load, recovery, and feedback.'}</div>
+      ${advanced && recommendation.coach_explanation?.recommended_overlay ? `
+        <div class="muted" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+          Overlay: ${recommendation.coach_explanation.recommended_overlay.next_action} • ${recommendation.coach_explanation.recommended_overlay.modification_reason}
+        </div>` : ''}
+    </div>
+
+    <div class="muted" style="margin-top: 16px;">
+      Mode: ${recommendation.athlete_mode} • Intensity: ${recommendation.intensity_band} • Next: ${recommendation.next_action}
+      <br>Reason: ${recommendation.modification_reason}
+    </div>
+  `;
 }
 
 function renderWorkout(w) {
@@ -471,105 +531,60 @@ function renderWorkout(w) {
   return content;
 }
 
-function renderPlan(modalities, recommendation, horizon) {
-  const options = modalities
-    .map((m) => `<option value="${m}" ${m === recommendation.selected_sport ? 'selected' : ''}>${m}</option>`)
-    .join('');
+function renderPlan(horizon) {
+  const weekDays = (horizon?.days || []).slice(0, 7);
+  
+  const dayCards = weekDays.map(d => {
+    const intensityColor = 
+      d.intensity_band === 'easy' ? '#4a9eff' :
+      d.intensity_band === 'moderate' ? '#10b981' :
+      d.intensity_band === 'hard' ? '#ef4444' : '#6b7690';
+    
+    return `
+      <div class="card" style="padding: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+          <div>
+            <div class="label">${new Date(d.date).toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric'})}</div>
+            <div class="value" style="font-size: 14px; margin-top: 4px;">${d.sport_type}</div>
+          </div>
+          <div style="
+            background: ${intensityColor};
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: capitalize;
+          ">${d.intensity_band}</div>
+        </div>
+        <div class="muted" style="font-size: 12px;">${d.firm ? '📌 Firm' : '💭 Soft'}</div>
+      </div>
+    `;
+  }).join('');
 
-  const workoutBlocks = recommendation.plan?.blocks || [];
-  const workoutGraph = renderWorkoutGraph(workoutBlocks);
-  const workoutDetails = renderWorkoutBlocks(workoutBlocks);
-
-  const weekRows = (horizon?.days || [])
-    .slice(0, 7)
-    .map((d) => `<li>${d.date} • ${d.intensity_band} • ${d.sport_type} ${d.firm ? '(firm)' : '(soft)'}</li>`)
-    .join('');
-
-  const fb = getAthleteFeedback();
-  const coachMode = getCoachMode();
   const advanced = isAdvancedUi();
 
   return `
     <div class="card">
-      ${advanced ? `<div class="label">Athlete ID</div>
-      <div style="display: flex; gap: 8px; margin-bottom: 16px;">
-        <input id="athleteIdInput" value="${getAthleteId()}" placeholder="athlete id" style="flex: 1;" />
-        <button id="applyAthleteBtn">Load</button>
-      </div>` : ''}
-      
-      <div class="label">Today's Activity</div>
-      <div style="display: flex; gap: 8px; margin-bottom: 16px;">
-        <select id="sportSelect" style="flex: 1;">${options}</select>
-        <button id="applySportBtn">Apply</button>
+      <div class="label">Training Phase</div>
+      <div class="value" style="font-size: 16px; margin-top: 8px; text-transform: capitalize;">
+        ${horizon?.periodization?.phase || '—'}
       </div>
-      
-      <div style="margin-bottom: 16px;">
-        <label style="display: flex; align-items: center; cursor: pointer;">
-          <input id="coachModeToggle" type="checkbox" ${coachMode ? 'checked' : ''}/>
-          <span class="muted">Coach Mode (TP-first)</span>
-        </label>
-      </div>
-      
-      <div style="margin-bottom: 12px;">
-        <div class="label" style="margin-bottom: 8px;">How did yesterday feel?</div>
-        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-          <button id="fbEasyBtn" ${fb === 'easy' ? 'disabled' : ''} style="flex: 1; min-width: 90px;">Too Easy</button>
-          <button id="fbOkBtn" ${fb === 'ok' ? 'disabled' : ''} style="flex: 1; min-width: 90px;">About Right</button>
-          <button id="fbHardBtn" ${fb === 'hard' ? 'disabled' : ''} style="flex: 1; min-width: 90px;">Too Hard</button>
+      <div class="muted" style="margin-top: 6px;">${horizon?.periodization?.reason || 'Planning next week...'}</div>
+      ${advanced && horizon?.coach_mode ? `
+        <div class="muted" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+          Coach Mode: ON • TP days: ${horizon?.coach_horizon_summary?.tp_days_with_plan || 0}/${horizon?.coach_horizon_summary?.total_days || 7}
         </div>
-      </div>
-      
-      <div style="padding-top: 12px; border-top: 1px solid var(--border-subtle);">
-        <div class="muted" style="margin-bottom: 4px;">Mode: ${recommendation.athlete_mode} • Intensity: ${recommendation.intensity_band}</div>
-        <div class="muted">Next: ${recommendation.next_action}</div>
-        ${recommendation.modification_reason ? `<div class="muted" style="margin-top: 4px;">Reason: ${recommendation.modification_reason}</div>` : ''}
-      </div>
-      
-      ${advanced ? `<div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
-        <div class="muted">Plan Source: ${recommendation.plan_source || 'peakflow'}</div>
-        <div class="muted">Feedback used: ${recommendation.feedback_summary?.used ? 'yes' : 'no'} • athlete: ${recommendation.feedback_summary?.athlete_feedback || '—'} • score: ${recommendation.feedback_summary?.review_score ?? '—'}</div>
-        <div style="margin-top: 12px;">
-          <div class="label" style="margin-bottom: 6px;">Recommendation Relevance</div>
-          <div style="display: flex; gap: 6px;">
-            <button id="rel1Btn" style="flex: 1;">1</button>
-            <button id="rel2Btn" style="flex: 1;">2</button>
-            <button id="rel3Btn" style="flex: 1;">3</button>
-            <button id="rel4Btn" style="flex: 1;">4</button>
-            <button id="rel5Btn" style="flex: 1;">5</button>
-          </div>
-        </div>
-      </div>` : ''}
+      ` : ''}
     </div>
-    
-    <div class="card">
-      <div class="label">Recommended Session</div>
-      <div class="value" style="margin-bottom: 12px;">${recommendation.plan?.title || '—'}</div>
-      ${advanced ? `<div class="muted" style="margin-bottom: 8px;">sport: ${recommendation.plan?.sport_type || '—'} • schema: ${recommendation.plan?.schema_version || '—'}</div>` : ''}
-      ${workoutBlocks.length > 0 ? `${workoutGraph}<div style="margin-top: 8px;">${workoutDetails}</div>` : '<div class="muted">No interval structure available</div>'}
-    </div>
-    
-    <div class="card">
-      <div class="label">Why This Changed</div>
-      <div class="muted" style="line-height: 1.6;">${recommendation.coach_explanation?.summary || 'Adaptive recommendation based on load, recovery, and feedback.'}</div>
-      ${advanced && recommendation.coach_explanation?.recommended_overlay ? `<div class="muted" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
-        Overlay: ${recommendation.coach_explanation.recommended_overlay.next_action || recommendation.next_action || '—'} (${recommendation.coach_explanation.recommended_overlay.modification_reason || recommendation.modification_reason || '—'})
-      </div>` : ''}
-    </div>
-    
-    <div class="card">
-      <div class="label">7-Day Firm Horizon</div>
-      <div class="muted" style="margin-bottom: 8px;">
-        Phase: ${horizon?.periodization?.phase || '—'} • ${horizon?.periodization?.reason || '—'}
-      </div>
-      <div class="muted" style="margin-bottom: 12px;">
-        Coach Mode: ${horizon?.coach_mode ? 'ON' : 'OFF'}${horizon?.coach_horizon_summary ? ` • TP days: ${horizon.coach_horizon_summary.tp_days_with_plan}/${horizon.coach_horizon_summary.total_days}` : ''}
-      </div>
-      ${weekRows ? `<ul style="margin: 0;">${weekRows}</ul>` : '<div class="muted">No horizon data available</div>'}
+
+    <div style="display: grid; gap: 12px;">
+      ${dayCards || '<div class="card"><div class="muted">No plan data available</div></div>'}
     </div>
   `;
 }
 
-function attachPlanHandlers() {
+function attachTodayWorkoutHandlers() {
   const athleteInput = document.getElementById('athleteIdInput');
   const athleteBtn = document.getElementById('applyAthleteBtn');
   const select = document.getElementById('sportSelect');
@@ -653,9 +668,7 @@ async function render() {
   try {
     const r = routeName();
     if (r === '/workout') {
-      const workout = await fetchWorkoutReview();
-      app.innerHTML = renderWorkout(workout);
-    } else if (r === '/plan') {
+      // Today's Workout = recommendation view
       const athleteId = getAthleteId();
       const serverState = await fetchPlannerState(athleteId);
 
@@ -670,13 +683,23 @@ async function render() {
       if (athleteFeedback) setAthleteFeedback(athleteFeedback);
       setCoachMode(coachMode);
 
-      const [modalities, recommendation, horizon] = await Promise.all([
+      const [modalities, recommendation] = await Promise.all([
         fetchModalities(),
         fetchPlanRecommendation(selected, focus, athleteFeedback, coachMode, athleteId),
-        fetchPlanHorizon(selected, focus, athleteId, coachMode),
       ]);
-      app.innerHTML = renderPlan(modalities, recommendation, horizon);
-      attachPlanHandlers();
+      app.innerHTML = renderTodayWorkout(modalities, recommendation);
+      attachTodayWorkoutHandlers();
+    } else if (r === '/plan') {
+      // Plan = 7-day calendar view
+      const athleteId = getAthleteId();
+      const serverState = await fetchPlannerState(athleteId);
+      
+      const selected = localStorage.getItem(SPORT_KEY) ? getSelectedSport() : (serverState.selected_sport || getSelectedSport());
+      const focus = localStorage.getItem(FOCUS_SPORT_KEY) ? getFocusSport() : (serverState.focus_sport || getFocusSport());
+      const coachMode = localStorage.getItem(COACH_MODE_KEY) ? getCoachMode() : ((typeof serverState.coach_mode === 'boolean') ? serverState.coach_mode : getCoachMode());
+
+      const horizon = await fetchPlanHorizon(selected, focus, athleteId, coachMode);
+      app.innerHTML = renderPlan(horizon);
     } else {
       // Default to recovery view for / and /recovery
       const payload = await fetchPayload();
