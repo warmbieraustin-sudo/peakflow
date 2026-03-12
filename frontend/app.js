@@ -206,11 +206,11 @@ function formatDuration(seconds) {
 function renderWorkoutGraph(blocks) {
   if (!blocks || blocks.length === 0) return '';
   
-  const totalDuration = blocks.reduce((sum, b) => sum + (b.duration_sec || 0), 0);
-  if (totalDuration === 0) return '';
+  const maxDuration = Math.max(...blocks.map(b => b.duration_sec || 0));
+  if (maxDuration === 0) return '';
   
-  const segments = blocks.map(b => {
-    const pct = ((b.duration_sec || 0) / totalDuration) * 100;
+  const bars = blocks.map(b => {
+    const heightPct = ((b.duration_sec || 0) / maxDuration) * 100;
     const color = getBlockColor(b);
     const targetRange = b.target_low && b.target_high 
       ? `${b.target_low}-${b.target_high}%`
@@ -218,20 +218,20 @@ function renderWorkoutGraph(blocks) {
     
     return `
       <div style="
-        flex: ${pct};
-        background: ${color};
-        height: 48px;
+        flex: 1;
         display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
         align-items: center;
-        justify-content: center;
-        font-size: 11px;
-        color: rgba(255,255,255,0.9);
-        font-weight: 600;
-        border-right: 1px solid rgba(0,0,0,0.2);
-        position: relative;
-        overflow: hidden;
+        min-width: 0;
       " title="${b.label}: ${formatDuration(b.duration_sec)} @ ${targetRange}">
-        ${pct > 8 ? formatDuration(b.duration_sec) : ''}
+        <div style="
+          width: 100%;
+          background: ${color};
+          height: ${heightPct}%;
+          border-radius: 4px 4px 0 0;
+          transition: opacity 0.2s;
+        "></div>
       </div>
     `;
   }).join('');
@@ -239,13 +239,16 @@ function renderWorkoutGraph(blocks) {
   return `
     <div style="
       display: flex;
+      gap: 4px;
       width: 100%;
+      height: 80px;
+      align-items: flex-end;
+      padding: 8px;
+      background: rgba(0,0,0,0.2);
       border-radius: 8px;
-      overflow: hidden;
       margin-bottom: 16px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     ">
-      ${segments}
+      ${bars}
     </div>
   `;
 }
