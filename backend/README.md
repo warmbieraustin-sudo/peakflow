@@ -75,3 +75,21 @@ Silver writes are deterministic overwrite-by-day (no append/merge drift).
 ```bash
 PYTHONPATH=. python3 scripts/validate_silver.py
 ```
+
+## Query layer
+```bash
+# Latest day consumer contract
+PYTHONPATH=. python3 scripts/query_daily.py
+
+# Specific day
+PYTHONPATH=. python3 scripts/query_daily.py --day 2026-03-11
+
+# Date range
+PYTHONPATH=. python3 scripts/query_range.py --oldest 2026-03-10 --newest 2026-03-11
+```
+
+## Lightweight tests
+```bash
+cd backend
+PYTHONPATH=. python3 -m unittest tests/test_query.py -v
+```
