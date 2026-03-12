@@ -32,23 +32,70 @@ def _pick_intensity_band(fresh: bool, load: float | None) -> str:
     return "moderate"
 
 
-def _templates_for_sport(sport: str, intensity: str) -> Dict[str, Any]:
-    # Minimal v1 templates; these become the universal plan schema for LLM + rules.
+def _templates_for_sport(
+    sport: str,
+    intensity: str,
+    preferences: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """
+    Template-driven workout generation.
+    Deterministic first (quality + safety), with preference-aware selection.
+    """
+    goal_text = ((preferences or {}).get("goals") or "").lower()
+
     if sport == "cycling":
+        # Hard day variants
         if intensity == "hard":
+            if any(k in goal_text for k in ["crit", "sprint", "anaerobic", "vo2"]):
+                return {
+                    "title": "Bike VO2 Max 5x4",
+                    "blocks": [
+                        {"label": "warmup", "duration_sec": 900, "target_type": "power_pct_ftp", "target_low": 55, "target_high": 65},
+                        {"label": "activation", "duration_sec": 300, "target_type": "power_pct_ftp", "target_low": 105, "target_high": 115},
+                        {"label": "recover", "duration_sec": 300, "target_type": "power_pct_ftp", "target_low": 45, "target_high": 55},
+                        {"label": "vo2_work", "duration_sec": 5 * 240, "target_type": "power_pct_ftp", "target_low": 108, "target_high": 118},
+                        {"label": "vo2_recover", "duration_sec": 5 * 240, "target_type": "power_pct_ftp", "target_low": 45, "target_high": 55},
+                        {"label": "cooldown", "duration_sec": 600, "target_type": "power_pct_ftp", "target_low": 50, "target_high": 60},
+                    ],
+                }
+            if any(k in goal_text for k in ["climb", "lookout", "threshold", "ftp"]):
+                return {
+                    "title": "Bike Threshold 3x12",
+                    "blocks": [
+                        {"label": "warmup", "duration_sec": 900, "target_type": "power_pct_ftp", "target_low": 55, "target_high": 65},
+                        {"label": "threshold_work", "duration_sec": 3 * 720, "target_type": "power_pct_ftp", "target_low": 94, "target_high": 99},
+                        {"label": "threshold_recover", "duration_sec": 3 * 360, "target_type": "power_pct_ftp", "target_low": 50, "target_high": 60},
+                        {"label": "cooldown", "duration_sec": 600, "target_type": "power_pct_ftp", "target_low": 50, "target_high": 60},
+                    ],
+                }
             return {
-                "title": "Bike Threshold Intervals",
+                "title": "Bike Over-Unders 4x8",
                 "blocks": [
                     {"label": "warmup", "duration_sec": 900, "target_type": "power_pct_ftp", "target_low": 55, "target_high": 65},
-                    {"label": "work", "duration_sec": 4 * 480, "target_type": "power_pct_ftp", "target_low": 92, "target_high": 98},
+                    {"label": "over_under_work", "duration_sec": 4 * 480, "target_type": "power_pct_ftp", "target_low": 88, "target_high": 103},
+                    {"label": "recover", "duration_sec": 4 * 300, "target_type": "power_pct_ftp", "target_low": 50, "target_high": 60},
                     {"label": "cooldown", "duration_sec": 600, "target_type": "power_pct_ftp", "target_low": 50, "target_high": 60},
                 ],
             }
+
         if intensity == "easy":
             return {
                 "title": "Bike Recovery Ride",
                 "blocks": [
                     {"label": "easy", "duration_sec": 3600, "target_type": "power_pct_ftp", "target_low": 40, "target_high": 55},
+                ],
+            }
+
+        # Moderate day variants
+        if any(k in goal_text for k in ["crit", "race", "surge"]):
+            return {
+                "title": "Bike Sweet Spot + Surges",
+                "blocks": [
+                    {"label": "warmup", "duration_sec": 900, "target_type": "power_pct_ftp", "target_low": 55, "target_high": 65},
+                    {"label": "sweet_spot", "duration_sec": 3 * 900, "target_type": "power_pct_ftp", "target_low": 85, "target_high": 92},
+                    {"label": "surges", "duration_sec": 6 * 45, "target_type": "power_pct_ftp", "target_low": 115, "target_high": 130},
+                    {"label": "surge_recover", "duration_sec": 6 * 75, "target_type": "power_pct_ftp", "target_low": 45, "target_high": 55},
+                    {"label": "cooldown", "duration_sec": 600, "target_type": "power_pct_ftp", "target_low": 50, "target_high": 60},
                 ],
             }
         return {
@@ -58,13 +105,54 @@ def _templates_for_sport(sport: str, intensity: str) -> Dict[str, Any]:
             ],
         }
 
+    if sport == "strength":
+        # Goal-aware strength templates with rep-scheme encoded in labels
+        if "upper/lower" in goal_text or "upper lower" in goal_text:
+            if intensity == "hard":
+                return {
+                    "title": "Strength Upper/Lower (Heavy)",
+                    "blocks": [
+                        {"label": "compound_5x5", "duration_sec": 1500, "target_type": "rpe", "target_low": 8, "target_high": 9},
+                        {"label": "accessory_4x8", "duration_sec": 1200, "target_type": "rpe", "target_low": 7, "target_high": 8},
+                        {"label": "core_3x12", "duration_sec": 900, "target_type": "rpe", "target_low": 6, "target_high": 7},
+                    ],
+                }
+            return {
+                "title": "Strength Upper/Lower (Volume)",
+                "blocks": [
+                    {"label": "main_4x8", "duration_sec": 1500, "target_type": "rpe", "target_low": 6, "target_high": 7},
+                    {"label": "accessory_3x12", "duration_sec": 1200, "target_type": "rpe", "target_low": 6, "target_high": 7},
+                    {"label": "mobility_finish", "duration_sec": 600, "target_type": "rpe", "target_low": 3, "target_high": 4},
+                ],
+            }
+
+        if "push/pull/legs" in goal_text or "push pull legs" in goal_text:
+            return {
+                "title": "Strength PPL Session",
+                "blocks": [
+                    {"label": "main_4x6", "duration_sec": 1500, "target_type": "rpe", "target_low": 7 if intensity != "easy" else 6, "target_high": 8 if intensity == "hard" else 7},
+                    {"label": "secondary_3x10", "duration_sec": 1200, "target_type": "rpe", "target_low": 6, "target_high": 7},
+                    {"label": "isolation_2x15", "duration_sec": 900, "target_type": "rpe", "target_low": 5, "target_high": 6},
+                ],
+            }
+
+        return {
+            "title": "Strength Session",
+            "blocks": [
+                {"label": "main_sets_4x6_8", "duration_sec": 1800, "target_type": "rpe", "target_low": 6 if intensity != "easy" else 5, "target_high": 8 if intensity == "hard" else 7},
+                {"label": "assistance_3x10", "duration_sec": 1200, "target_type": "rpe", "target_low": 6 if intensity != "easy" else 5, "target_high": 7},
+                {"label": "mobility_finish", "duration_sec": 600, "target_type": "rpe", "target_low": 3, "target_high": 4},
+            ],
+        }
+
     if sport == "running":
         if intensity == "hard":
             return {
                 "title": "Run Tempo Intervals",
                 "blocks": [
                     {"label": "warmup", "duration_sec": 900, "target_type": "rpe", "target_low": 3, "target_high": 4},
-                    {"label": "tempo", "duration_sec": 3 * 600, "target_type": "rpe", "target_low": 7, "target_high": 8},
+                    {"label": "tempo", "duration_sec": 4 * 600, "target_type": "rpe", "target_low": 7, "target_high": 8},
+                    {"label": "jog_recover", "duration_sec": 4 * 180, "target_type": "rpe", "target_low": 2, "target_high": 3},
                     {"label": "cooldown", "duration_sec": 600, "target_type": "rpe", "target_low": 2, "target_high": 3},
                 ],
             }
@@ -75,17 +163,13 @@ def _templates_for_sport(sport: str, intensity: str) -> Dict[str, Any]:
             ],
         }
 
-    if sport == "strength":
+    if sport == "swimming":
         return {
-            "title": "Strength Session",
+            "title": "Swim Technique + Aerobic",
             "blocks": [
-                {
-                    "label": "main_sets",
-                    "duration_sec": 3000,
-                    "target_type": "rpe",
-                    "target_low": 6 if intensity != "easy" else 5,
-                    "target_high": 8 if intensity == "hard" else 7,
-                },
+                {"label": "drills", "duration_sec": 900, "target_type": "pace", "target_low": 2, "target_high": 3},
+                {"label": "main_set", "duration_sec": 1800, "target_type": "pace", "target_low": 4, "target_high": 6},
+                {"label": "easy", "duration_sec": 600, "target_type": "pace", "target_low": 2, "target_high": 3},
             ],
         }
 
@@ -97,7 +181,15 @@ def _templates_for_sport(sport: str, intensity: str) -> Dict[str, Any]:
             ],
         }
 
-    # default template for mixed/outdoor modalities (hiking/skiing/swimming/walking)
+    if sport in ("hiking", "walking"):
+        return {
+            "title": "Aerobic Hike / Walk",
+            "blocks": [
+                {"label": "steady", "duration_sec": 3600, "target_type": "rpe", "target_low": 4, "target_high": 6},
+            ],
+        }
+
+    # skiing + generic fallback
     return {
         "title": f"{sport.title()} Aerobic Session",
         "blocks": [
@@ -540,7 +632,7 @@ def build_daily_recommendation(
     adjustment = _apply_feedback_adjustments(sport, athlete_mode, base_intensity, last_review, athlete_feedback=athlete_feedback)
     intensity = adjustment["intensity_band"]
 
-    template = _templates_for_sport(sport, intensity)
+    template = _templates_for_sport(sport, intensity, preferences=preferences)
 
     plan = {
         "schema_version": "v1-modality-agnostic",
@@ -779,7 +871,7 @@ def build_horizon_plan(
                 "blocks": [{"label": "recovery", "duration_sec": 1200, "target_type": "rpe", "target_low": 1, "target_high": 2}],
             }
         else:
-            t = _templates_for_sport(day_sport, template_intensity)
+            t = _templates_for_sport(day_sport, template_intensity, preferences=preferences)
             scaled_blocks = []
             for b in t["blocks"]:
                 dur = int((b.get("duration_sec") or 0) * volume_multiplier)
