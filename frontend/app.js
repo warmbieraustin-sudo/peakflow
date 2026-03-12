@@ -870,13 +870,11 @@ function renderAnalysis(data, workoutData) {
   }
 
   return `
-    ${workoutSection}
     <div class="card">
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
-        <div style="flex: 1;">
-          <div class="label">14-Day Analysis</div>
-          <div class="value" style="font-size: 16px; margin-top: 8px;">${insights.summary || 'Analysis complete'}</div>
-          ${generatedAt ? `<div class="muted" style="font-size: 12px; margin-top: 8px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <div class="label">Analysis</div>
+          ${generatedAt ? `<div class="muted" style="font-size: 12px; margin-top: 4px;">
             ${cached ? '💾 Cached' : '✨ Fresh'} • Generated ${timeAgo}
           </div>` : ''}
         </div>
@@ -892,6 +890,13 @@ function renderAnalysis(data, workoutData) {
           white-space: nowrap;
         ">Refresh</button>
       </div>
+    </div>
+    
+    ${workoutSection}
+    
+    <div class="card">
+      <div class="label">14-Day Analysis</div>
+      <div class="value" style="font-size: 16px; margin-top: 8px;">${insights.summary || 'Analysis complete'}</div>
     </div>
 
     <div class="card">
@@ -937,9 +942,10 @@ function attachAnalysisHandlers() {
       refreshBtn.disabled = true;
       refreshBtn.textContent = 'Refreshing...';
       try {
-        const data = await fetchLLMAnalysis(true);  // force refresh
+        const data = await fetchLLMAnalysis(true);  // force refresh 14-day analysis
+        const workoutData = await fetchTodaysWorkoutAnalysis();  // workout analysis cached per day
         const app = document.getElementById('app');
-        app.innerHTML = renderAnalysis(data);
+        app.innerHTML = renderAnalysis(data, workoutData);
         attachAnalysisHandlers();  // re-attach after re-render
       } catch (e) {
         alert(e.message || 'Refresh failed. Please try again in 6 hours.');
