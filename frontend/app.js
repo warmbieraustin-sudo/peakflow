@@ -58,6 +58,22 @@ async function fetchLLMWorkoutExplanation(sport, athleteId, coachMode) {
   return r.body.explanation;
 }
 
+async function fetchLLMWeeklyPlan(startDate, athleteId) {
+  const qs = new URLSearchParams({
+    startDate: startDate || getTodayISO(),
+    athleteId: athleteId || 'default'
+  });
+  const r = await apiGet(`/api/alpha/llm/weekly-plan?${qs.toString()}`);
+  if (!r.ok) return null;
+  return r.body.plan;
+}
+
+async function fetchLLMAnalysis() {
+  const r = await apiGet('/api/alpha/llm/analysis');
+  if (!r.ok) return null;
+  return r.body.insights;
+}
+
 const SPORT_KEY = 'peakflow_selected_sport';
 const FOCUS_SPORT_KEY = 'peakflow_focus_sport';
 const ATHLETE_FEEDBACK_KEY = 'peakflow_athlete_feedback';
@@ -633,6 +649,69 @@ function renderPlan(horizon) {
   `;
 }
 
+function renderAnalysis(insights) {
+  if (!insights) {
+    return `
+      <div class="card">
+        <div class="label">Analysis Insights</div>
+        <div class="muted">Loading analysis...</div>
+      </div>
+    `;
+  }
+
+  const performance = (insights.performance_insights || []).map(i => 
+    `<li>${i}</li>`
+  ).join('');
+  
+  const recovery = (insights.recovery_insights || []).map(i => 
+    `<li>${i}</li>`
+  ).join('');
+  
+  const recommendations = (insights.recommendations || []).map(i => 
+    `<li>${i}</li>`
+  ).join('');
+
+  return `
+    <div class="card">
+      <div class="label">14-Day Analysis</div>
+      <div class="value" style="margin-bottom: 16px;">${insights.summary || 'Analysis complete'}</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Performance Insights</div>
+      <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+        ${performance || '<li class="muted">No performance data available</li>'}
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="label">Recovery Insights</div>
+      <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+        ${recovery || '<li class="muted">No recovery data available</li>'}
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="label">Recommendations</div>
+      <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+        ${recommendations || '<li class="muted">No recommendations available</li>'}
+      </ul>
+    </div>
+  `;
+}
+
+function renderChat() {
+  return `
+    <div class="card">
+      <div class="label">Chat</div>
+      <div class="muted" style="padding: 40px 20px; text-align: center;">
+        Chat interface coming soon!<br><br>
+        Will support conversational Q&A and plan modifications.
+      </div>
+    </div>
+  `;
+}
+
 function attachTodayWorkoutHandlers() {
   const athleteInput = document.getElementById('athleteIdInput');
   const athleteBtn = document.getElementById('applyAthleteBtn');
@@ -750,6 +829,13 @@ async function render() {
 
       const horizon = await fetchPlanHorizon(selected, focus, athleteId, coachMode);
       app.innerHTML = renderPlan(horizon);
+    } else if (r === '/analysis') {
+      // Analysis = performance and recovery trend insights
+      const insights = await fetchLLMAnalysis();
+      app.innerHTML = renderAnalysis(insights);
+    } else if (r === '/chat') {
+      // Chat = conversational interface
+      app.innerHTML = renderChat();
     } else {
       // Default to recovery view for / and /recovery
       const payload = await fetchPayload();
