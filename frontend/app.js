@@ -31,6 +31,38 @@ async function fetchWorkoutReview() {
   return r.body.payload;
 }
 
+const SPORT_KEY = 'peakflow_selected_sport';
+const FOCUS_SPORT_KEY = 'peakflow_focus_sport';
+
+function getSelectedSport() {
+  return localStorage.getItem(SPORT_KEY) || 'cycling';
+}
+
+function setSelectedSport(s) {
+  localStorage.setItem(SPORT_KEY, s || 'cycling');
+}
+
+function getFocusSport() {
+  return localStorage.getItem(FOCUS_SPORT_KEY) || 'cycling';
+}
+
+function setFocusSport(s) {
+  localStorage.setItem(FOCUS_SPORT_KEY, s || 'cycling');
+}
+
+async function fetchModalities() {
+  const r = await apiGet('/api/alpha/planner/modalities');
+  if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
+  return r.body.modalities || [];
+}
+
+async function fetchPlanRecommendation(sport, focusSport) {
+  const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '' });
+  const r = await apiGet(`/api/alpha/planner/recommendation?${qs.toString()}`);
+  if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
+  return r.body.payload;
+}
+
 function card(label, value) {
   return `<div class="card"><div class="label">${label}</div><div class="value">${value ?? '—'}</div></div>`;
 }
@@ -139,6 +171,41 @@ function renderWorkout(w) {
   return content;
 }
 
+function renderPlan(modalities, recommendation) {
+  const options = modalities
+    .map((m) => `<option value="${m}" ${m === recommendation.selected_sport ? 'selected' : ''}>${m}</option>`)
+    .join('');
+
+  const blocks = (recommendation.plan?.blocks || [])
+    .map((b) => `<li>${b.label}: ${b.duration_sec}s • ${b.target_type} ${b.target_low ?? '—'}-${b.target_high ?? '—'}</li>`)
+    .join('');
+
+  return `
+    <div class="card">
+      <div class="label">Today's Activity</div>
+      <select id="sportSelect">${options}</select>
+      <button id="applySportBtn">Apply</button>
+      <div class="muted">Mode: ${recommendation.athlete_mode} • Intensity: ${recommendation.intensity_band}</div>
+    </div>
+    <div class="card">
+      <div class="label">Recommended Session</div>
+      <div class="value">${recommendation.plan?.title || '—'}</div>
+      <div class="muted">sport: ${recommendation.plan?.sport_type || '—'} • schema: ${recommendation.plan?.schema_version || '—'}</div>
+      <ul>${blocks}</ul>
+    </div>
+  `;
+}
+
+function attachPlanHandlers() {
+  const select = document.getElementById('sportSelect');
+  const btn = document.getElementById('applySportBtn');
+  if (!select || !btn) return;
+  btn.addEventListener('click', async () => {
+    setSelectedSport(select.value);
+    await render();
+  });
+}
+
 function routeName() {
   return (location.hash || '#/').replace('#', '');
 }
@@ -162,6 +229,13 @@ async function render() {
     if (r === '/workout') {
       const workout = await fetchWorkoutReview();
       app.innerHTML = renderWorkout(workout);
+    } else if (r === '/plan') {
+      const [modalities, recommendation] = await Promise.all([
+        fetchModalities(),
+        fetchPlanRecommendation(getSelectedSport(), getFocusSport()),
+      ]);
+      app.innerHTML = renderPlan(modalities, recommendation);
+      attachPlanHandlers();
     } else {
       const payload = await fetchPayload();
       if (r === '/recovery') app.innerHTML = renderRecovery(payload);

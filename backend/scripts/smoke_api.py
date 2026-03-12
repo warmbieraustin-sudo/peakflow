@@ -60,6 +60,12 @@ def main() -> int:
         status, body = get_json(base + "/api/alpha/workout/latest", token=args.token or None)
         checks.append(("workout_latest", status == 200 and body.get("ok") is True, status, body))
 
+        status, body = get_json(base + "/api/alpha/planner/modalities", token=args.token or None)
+        checks.append(("planner_modalities", status == 200 and body.get("ok") is True and isinstance(body.get("modalities"), list), status, body))
+
+        status, body = get_json(base + "/api/alpha/planner/recommendation?sport=running", token=args.token or None)
+        checks.append(("planner_reco", status == 200 and body.get("ok") is True and (body.get("payload") or {}).get("selected_sport") == "running", status, body))
+
         # if token mode enabled, verify unauthorized without token
         if args.token:
             status2, body2 = get_json(base + "/api/alpha/shell/today", token=None)

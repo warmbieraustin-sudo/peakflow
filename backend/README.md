@@ -126,6 +126,8 @@ Default endpoints:
 - `GET /api/alpha/shell/today`
 - `GET /api/alpha/shell/YYYY-MM-DD`
 - `GET /api/alpha/workout/latest?day=YYYY-MM-DD`
+- `GET /api/alpha/planner/modalities`
+- `GET /api/alpha/planner/recommendation?sport=cycling&focusSport=cycling`
 
 Auth:
 - set `PEAKFLOW_ALPHA_TOKEN` to require `Authorization: Bearer <token>`
@@ -144,3 +146,4 @@ Frontend route skeleton (served by same process):
 - `#/recovery`
 - `#/chat`
 - `#/workout` (latest workout review)
+- `#/plan` (daily activity selection + modality-specific recommendation)

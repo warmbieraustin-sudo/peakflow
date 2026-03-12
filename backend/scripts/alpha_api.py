@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlparse
 
 from peakflow.pwa_contract import build_alpha_shell_payload
 from peakflow.workout_review import build_latest_workout_review
+from peakflow.planner import SUPPORTED_SPORTS, build_daily_recommendation
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT.parent / "frontend"
@@ -104,12 +105,15 @@ class AlphaHandler(BaseHTTPRequestHandler):
                             {"path": "/", "screen": "morning_brief"},
                             {"path": "/recovery", "screen": "recovery_load"},
                             {"path": "/chat", "screen": "chat_context"},
+                            {"path": "/plan", "screen": "daily_plan"},
                         ],
                         "api": [
                             "/api/health",
                             "/api/alpha/shell/today",
                             "/api/alpha/shell/YYYY-MM-DD",
                             "/api/alpha/workout/latest",
+                            "/api/alpha/planner/modalities",
+                            "/api/alpha/planner/recommendation?sport=cycling",
                         ],
                     },
                 )
@@ -135,6 +139,18 @@ class AlphaHandler(BaseHTTPRequestHandler):
                 payload = build_latest_workout_review(day=day)
                 return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
 
+            if path == "/api/alpha/planner/modalities":
+                return _json(self, HTTPStatus.OK, {"ok": True, "modalities": SUPPORTED_SPORTS})
+
+            if path == "/api/alpha/planner/recommendation":
+                q = parse_qs(parsed.query)
+                day = (q.get("day") or [None])[0]
+                sport = (q.get("sport") or ["cycling"])[0]
+                focus_sport = (q.get("focusSport") or [None])[0]
+                shell = build_alpha_shell_payload(SILVER_DIR, day=day)
+                payload = build_daily_recommendation(shell, sport, focus_sport=focus_sport)
+                return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
+
             return _json(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "not_found"})
 
         # Frontend static routes
@@ -142,7 +158,7 @@ class AlphaHandler(BaseHTTPRequestHandler):
             return
 
         # Simple SPA fallback
-        if path in ["/recovery", "/chat", "/workout"] and self._serve_frontend("/"):
+        if path in ["/recovery", "/chat", "/workout", "/plan"] and self._serve_frontend("/"):
             return
 
         return _text(self, HTTPStatus.NOT_FOUND, "Not found")
