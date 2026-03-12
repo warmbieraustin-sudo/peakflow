@@ -14,6 +14,8 @@ DEFAULT_PREFERENCES = {
     "units": "imperial",  # Display units: "imperial" or "metric"
     "race_dates": [],  # Optional ISO dates for target races (calendar-aware periodization)
     "block_weeks": 4,  # Block periodization cycle length (default 3:1 build/deload)
+    "ftp_watts": None,  # User-set FTP (manual override)
+    "ftp_auto_sync": True,  # Auto-update FTP from detected source changes
 }
 
 
@@ -110,5 +112,20 @@ def validate_preferences(prefs: Dict[str, Any]) -> Dict[str, Any]:
                 validated["block_weeks"] = bw
         except Exception:
             pass
+
+    # FTP watts
+    if "ftp_watts" in prefs:
+        try:
+            ftp = float(prefs["ftp_watts"])
+            if 80 <= ftp <= 600:
+                validated["ftp_watts"] = round(ftp, 1)
+        except Exception:
+            # allow explicit null/empty to clear
+            if prefs.get("ftp_watts") in (None, "", 0):
+                validated["ftp_watts"] = None
+
+    # FTP auto-sync
+    if "ftp_auto_sync" in prefs:
+        validated["ftp_auto_sync"] = bool(prefs["ftp_auto_sync"])
     
     return validated

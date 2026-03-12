@@ -1076,6 +1076,10 @@ function renderPreferences(prefs = {}) {
   const units = prefs.units || 'imperial';
   const raceDates = (prefs.race_dates || []).join(', ');
   const blockWeeks = prefs.block_weeks || 4;
+  const ftpWatts = prefs.ftp_watts || '';
+  const ftpAutoSync = prefs.ftp_auto_sync !== false;
+  const ftpDetected = prefs.ftp_detected_watts || null;
+  const ftpChangePct = prefs.ftp_change_pct;
   
   // Convert for display if imperial
   const heightDisplay = units === 'imperial' && heightCm ? (heightCm / 2.54).toFixed(1) : heightCm;
@@ -1180,6 +1184,23 @@ function renderPreferences(prefs = {}) {
           step="1"
           style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); margin-bottom: 16px;"
         />
+
+        <label style="display: block; margin-bottom: 8px; font-weight: 600;">FTP (watts)</label>
+        <input
+          type="number"
+          id="ftpInput"
+          value="${ftpWatts}"
+          min="80"
+          max="600"
+          step="1"
+          placeholder="e.g., 265"
+          style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); margin-bottom: 8px;"
+        />
+        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer;">
+          <input type="checkbox" id="ftpAutoSyncInput" ${ftpAutoSync ? 'checked' : ''} />
+          <span>Auto-sync FTP from recent data</span>
+        </label>
+        ${ftpDetected ? `<div class="muted" style="font-size:12px; margin-bottom: 16px;">Detected FTP: ${ftpDetected}W${ftpChangePct != null ? ` • Change vs set: ${ftpChangePct > 0 ? '+' : ''}${ftpChangePct}%` : ''}</div>` : '<div style="margin-bottom: 16px;"></div>'}
         
         <button id="savePreferencesBtn" style="width: 100%; padding: 14px; background: var(--accent); color: white; border: none; border-radius: 8px; font-weight: 600; font-size: 16px; cursor: pointer;">
           Save Preferences
@@ -1417,6 +1438,10 @@ function attachPreferencesHandlers() {
     const blockWeeksVal = parseInt(document.getElementById('blockWeeksInput')?.value || '4', 10);
     const blockWeeks = Number.isFinite(blockWeeksVal) ? blockWeeksVal : 4;
 
+    const ftpVal = parseFloat(document.getElementById('ftpInput')?.value || '');
+    const ftpWatts = Number.isFinite(ftpVal) ? ftpVal : null;
+    const ftpAutoSync = !!document.getElementById('ftpAutoSyncInput')?.checked;
+
     const prefs = {
       sports,
       weekly_hours: weeklyHours,
@@ -1426,6 +1451,8 @@ function attachPreferencesHandlers() {
       units,
       race_dates: raceDates,
       block_weeks: blockWeeks,
+      ftp_watts: ftpWatts,
+      ftp_auto_sync: ftpAutoSync,
     };
     
     saveBtn.textContent = 'Saving...';

@@ -767,12 +767,12 @@ class AlphaHandler(BaseHTTPRequestHandler):
 
             if path == "/api/alpha/preferences":
                 from peakflow.preferences import get_preferences
-                
+
                 q = parse_qs(parsed.query)
                 athlete_id = (q.get('athleteId') or ['default'])[0]
                 saved = _get_athlete_state(athlete_id)
                 preferences = get_preferences(saved)
-                
+
                 # Auto-populate weight from latest Garmin wellness if available
                 if not preferences.get("weight_kg"):
                     try:
@@ -784,7 +784,44 @@ class AlphaHandler(BaseHTTPRequestHandler):
                                 preferences["weight_kg"] = weight_kg
                     except Exception:
                         pass
-                
+
+                # Auto-detect FTP changes from Intervals.icu recent activities
+                ftp_detected = None
+                ftp_change_pct = None
+                try:
+                    icu = IntervalsClient.from_env()
+                    newest = date.today().isoformat()
+                    oldest = (date.today() - timedelta(days=60)).isoformat()
+                    activities = icu.activities(oldest, newest)
+                    # pick latest activity with FTP signal
+                    latest = None
+                    for a in sorted(activities or [], key=lambda x: x.get("start_date_local") or "", reverse=True):
+                        ftp_val = a.get("icu_ftp") or a.get("icu_pm_ftp_watts")
+                        if isinstance(ftp_val, (int, float)) and ftp_val > 0:
+                            latest = a
+                            break
+                    if latest:
+                        ftp_detected = float(latest.get("icu_ftp") or latest.get("icu_pm_ftp_watts"))
+                        user_ftp = preferences.get("ftp_watts")
+                        auto_sync = bool(preferences.get("ftp_auto_sync", True))
+
+                        if isinstance(user_ftp, (int, float)) and user_ftp > 0:
+                            ftp_change_pct = round(((ftp_detected - float(user_ftp)) / float(user_ftp)) * 100.0, 1)
+
+                        # Auto-sync if enabled or no user FTP set
+                        if auto_sync or not user_ftp:
+                            preferences["ftp_watts"] = round(ftp_detected, 1)
+
+                        preferences["ftp_detected_watts"] = round(ftp_detected, 1)
+                        preferences["ftp_detected_date"] = (latest.get("start_date_local") or "")[:10]
+                        if ftp_change_pct is not None:
+                            preferences["ftp_change_pct"] = ftp_change_pct
+
+                        # Persist auto-updated FTP values
+                        _upsert_athlete_state(athlete_id, {"preferences": preferences})
+                except Exception:
+                    pass
+
                 return _json(self, HTTPStatus.OK, {
                     "ok": True,
                     "preferences": preferences
