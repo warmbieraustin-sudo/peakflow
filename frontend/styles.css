@@ -1,13 +1,16 @@
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
-header { padding: 14px 16px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; justify-content: space-between; }
-nav a { color: #93c5fd; margin-left: 12px; text-decoration: none; }
+header { padding: 14px 16px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+nav { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+nav a { color: #93c5fd; text-decoration: none; }
 main { padding: 16px; }
 .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
 .label { color: #94a3b8; font-size: 12px; }
 .value { font-size: 18px; font-weight: 600; }
-.row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 pre { white-space: pre-wrap; }
 .muted { color: #94a3b8; font-size: 12px; }
-.auth-bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid #1e293b; }
-.auth-bar input { background: #0b1220; border: 1px solid #1f2937; color: #e2e8f0; border-radius: 8px; padding: 6px 8px; min-width: 280px; }
-.auth-bar button { background: #1d4ed8; color: #fff; border: none; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.auth-bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid #1e293b; flex-wrap: wrap; }
+.auth-bar input, input, select { background: #0b1220; border: 1px solid #1f2937; color: #e2e8f0; border-radius: 8px; padding: 6px 8px; min-width: 180px; }
+button { background: #1d4ed8; color: #fff; border: none; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.ghost-btn { background: transparent; border: 1px solid #334155; color: #cbd5e1; }
+.hidden { display: none !important; }

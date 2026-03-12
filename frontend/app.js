@@ -1,4 +1,5 @@
 const TOKEN_KEY = 'peakflow_alpha_token';
+const ADVANCED_KEY = 'peakflow_advanced_ui';
 
 function getToken() {
   return localStorage.getItem(TOKEN_KEY) || '';
@@ -7,6 +8,14 @@ function getToken() {
 function setToken(token) {
   if (!token) localStorage.removeItem(TOKEN_KEY);
   else localStorage.setItem(TOKEN_KEY, token.trim());
+}
+
+function isAdvancedUi() {
+  return localStorage.getItem(ADVANCED_KEY) === '1';
+}
+
+function setAdvancedUi(on) {
+  localStorage.setItem(ADVANCED_KEY, on ? '1' : '0');
 }
 
 async function apiGet(path) {
@@ -143,13 +152,43 @@ function renderMorning(p) {
 }
 
 function renderRecovery(p) {
-  const r = p.screens.recovery_load;
-  return `<div class="card"><pre>${JSON.stringify(r, null, 2)}</pre></div>`;
+  const r = p.screens.recovery_load || {};
+  const rec = r.recovery || {};
+  const load = r.load || {};
+  const act = r.activity_summary || {};
+  const sleepHours = rec.sleep_seconds ? (rec.sleep_seconds / 3600).toFixed(1) : '—';
+
+  return `
+    <div class="row">
+      ${card('Sleep Score', rec.sleep_score ?? '—')}
+      ${card('Sleep Hours', sleepHours)}
+      ${card('HRV', rec.hrv ?? '—')}
+      ${card('Resting HR', rec.resting_hr ?? '—')}
+      ${card('Weight (kg)', rec.weight_kg ?? '—')}
+    </div>
+    <div class="card">
+      <div class="label">Training Load</div>
+      <div class="row">
+        ${card('CTL', load.ctl ?? '—')}
+        ${card('ATL', load.atl ?? '—')}
+        ${card('Daily TL', load.daily_training_load ?? '—')}
+        ${card('Ramp Rate', load.ramp_rate ?? '—')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="label">Recent Activity Summary</div>
+      <div class="row">
+        ${card('Workouts', act.count ?? 0)}
+        ${card('Total kJ', act.total_kj ?? 0)}
+        ${card('Total Calories', act.total_calories ?? 0)}
+        ${card('Avg NP', act.avg_np ?? '—')}
+      </div>
+    </div>
+  `;
 }
 
-function renderChat(p) {
-  const c = p.screens.chat_context;
-  return `<div class="card"><pre>${JSON.stringify(c, null, 2)}</pre></div>`;
+function renderChat() {
+  return `<div class="card"><div class="value">Chat UI coming soon.</div><div class="muted">For now, use planner + review tabs.</div></div>`;
 }
 
 function renderWorkout(w) {
@@ -244,12 +283,13 @@ function renderPlan(modalities, recommendation, horizon) {
 
   const fb = getAthleteFeedback();
   const coachMode = getCoachMode();
+  const advanced = isAdvancedUi();
 
   return `
     <div class="card">
-      <div class="label">Athlete</div>
+      ${advanced ? `<div class="label">Athlete</div>
       <input id="athleteIdInput" value="${getAthleteId()}" placeholder="athlete id" />
-      <button id="applyAthleteBtn">Load Athlete</button>
+      <button id="applyAthleteBtn">Load Athlete</button>` : ''}
       <div class="label" style="margin-top:8px;">Today's Activity</div>
       <select id="sportSelect">${options}</select>
       <button id="applySportBtn">Apply</button>
@@ -264,17 +304,17 @@ function renderPlan(modalities, recommendation, horizon) {
       </div>
       <div class="muted">Mode: ${recommendation.athlete_mode} • Intensity: ${recommendation.intensity_band} • Next: ${recommendation.next_action}</div>
       <div class="muted">Reason: ${recommendation.modification_reason}</div>
-      <div class="muted">Plan Source: ${recommendation.plan_source || 'peakflow'}</div>
+      ${advanced ? `<div class="muted">Plan Source: ${recommendation.plan_source || 'peakflow'}</div>
       <div class="muted">Feedback used: ${recommendation.feedback_summary?.used ? 'yes' : 'no'} • athlete: ${recommendation.feedback_summary?.athlete_feedback || '—'} • score: ${recommendation.feedback_summary?.review_score ?? '—'}</div>
       <div style="margin-top:8px;">
         <span class="muted">Recommendation relevance:</span>
         <button id="rel1Btn">1</button><button id="rel2Btn">2</button><button id="rel3Btn">3</button><button id="rel4Btn">4</button><button id="rel5Btn">5</button>
-      </div>
+      </div>` : ''}
     </div>
     <div class="card">
       <div class="label">Recommended Session</div>
       <div class="value">${recommendation.plan?.title || '—'}</div>
-      <div class="muted">sport: ${recommendation.plan?.sport_type || '—'} • schema: ${recommendation.plan?.schema_version || '—'}</div>
+      ${advanced ? `<div class="muted">sport: ${recommendation.plan?.sport_type || '—'} • schema: ${recommendation.plan?.schema_version || '—'}</div>` : ''}
       <ul>${blocks}</ul>
     </div>
     <div class="card">
@@ -349,6 +389,14 @@ function setAuthStatus(text) {
   if (el) el.textContent = text;
 }
 
+function syncAdvancedUi() {
+  const panel = document.getElementById('advancedPanel');
+  const btn = document.getElementById('advancedToggleBtn');
+  const on = isAdvancedUi();
+  if (panel) panel.classList.toggle('hidden', !on);
+  if (btn) btn.textContent = on ? 'Hide Advanced' : 'Advanced';
+}
+
 async function refreshAuthStatus() {
   const r = await apiGet('/api/health');
   if (r.ok) setAuthStatus(`Auth: connected (${getToken() ? 'token set' : 'open'})`);
@@ -401,19 +449,34 @@ function initAuthUi() {
   const tokenInput = document.getElementById('tokenInput');
   const saveBtn = document.getElementById('saveTokenBtn');
   const clearBtn = document.getElementById('clearTokenBtn');
+  const advancedToggleBtn = document.getElementById('advancedToggleBtn');
 
-  tokenInput.value = getToken();
+  if (tokenInput) tokenInput.value = getToken();
 
-  saveBtn.addEventListener('click', async () => {
-    setToken(tokenInput.value);
-    await render();
-  });
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      setToken(tokenInput?.value || '');
+      await render();
+    });
+  }
 
-  clearBtn.addEventListener('click', async () => {
-    setToken('');
-    tokenInput.value = '';
-    await render();
-  });
+  if (clearBtn) {
+    clearBtn.addEventListener('click', async () => {
+      setToken('');
+      if (tokenInput) tokenInput.value = '';
+      await render();
+    });
+  }
+
+  if (advancedToggleBtn) {
+    advancedToggleBtn.addEventListener('click', () => {
+      setAdvancedUi(!isAdvancedUi());
+      syncAdvancedUi();
+      render();
+    });
+  }
+
+  syncAdvancedUi();
 }
 
 window.addEventListener('hashchange', render);
