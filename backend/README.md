@@ -112,6 +112,7 @@ PYTHONPATH=. python3 scripts/pwa_payload.py --write
 ```
 
 Contract doc: `backend/docs/ALPHA_UI_CONTRACT.md`
+Workout review contract: `backend/docs/WORKOUT_REVIEW_CONTRACT.md`
 
 ## Alpha API + shell routes (Day 15/16)
 ```bash
@@ -124,6 +125,7 @@ Default endpoints:
 - `GET /api/alpha/routes`
 - `GET /api/alpha/shell/today`
 - `GET /api/alpha/shell/YYYY-MM-DD`
+- `GET /api/alpha/workout/latest?day=YYYY-MM-DD`
 
 Auth:
 - set `PEAKFLOW_ALPHA_TOKEN` to require `Authorization: Bearer <token>`
@@ -141,3 +143,4 @@ Frontend route skeleton (served by same process):
 - `/` (Morning Brief)
 - `#/recovery`
 - `#/chat`
+- `#/workout` (latest workout review)

@@ -25,6 +25,12 @@ async function fetchPayload() {
   return r.body.payload;
 }
 
+async function fetchWorkoutReview() {
+  const r = await apiGet('/api/alpha/workout/latest');
+  if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
+  return r.body.payload;
+}
+
 function card(label, value) {
   return `<div class="card"><div class="label">${label}</div><div class="value">${value ?? '—'}</div></div>`;
 }
@@ -57,6 +63,10 @@ function renderChat(p) {
   return `<div class="card"><pre>${JSON.stringify(c, null, 2)}</pre></div>`;
 }
 
+function renderWorkout(w) {
+  return `<div class="card"><pre>${JSON.stringify(w, null, 2)}</pre></div>`;
+}
+
 function routeName() {
   return (location.hash || '#/').replace('#', '');
 }
@@ -76,11 +86,16 @@ async function refreshAuthStatus() {
 async function render() {
   const app = document.getElementById('app');
   try {
-    const payload = await fetchPayload();
     const r = routeName();
-    if (r === '/recovery') app.innerHTML = renderRecovery(payload);
-    else if (r === '/chat') app.innerHTML = renderChat(payload);
-    else app.innerHTML = renderMorning(payload);
+    if (r === '/workout') {
+      const workout = await fetchWorkoutReview();
+      app.innerHTML = renderWorkout(workout);
+    } else {
+      const payload = await fetchPayload();
+      if (r === '/recovery') app.innerHTML = renderRecovery(payload);
+      else if (r === '/chat') app.innerHTML = renderChat(payload);
+      else app.innerHTML = renderMorning(payload);
+    }
   } catch (e) {
     app.innerHTML = `<div class='card'>Error: ${e.message}</div>`;
   }

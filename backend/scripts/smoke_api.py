@@ -57,6 +57,9 @@ def main() -> int:
         status, body = get_json(base + "/api/alpha/shell/today", token=args.token or None)
         checks.append(("shell_today", status == 200 and body.get("ok") is True, status, body))
 
+        status, body = get_json(base + "/api/alpha/workout/latest", token=args.token or None)
+        checks.append(("workout_latest", status == 200 and body.get("ok") is True, status, body))
+
         # if token mode enabled, verify unauthorized without token
         if args.token:
             status2, body2 = get_json(base + "/api/alpha/shell/today", token=None)

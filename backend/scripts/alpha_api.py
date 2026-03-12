@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from peakflow.pwa_contract import build_alpha_shell_payload
+from peakflow.workout_review import build_latest_workout_review
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT.parent / "frontend"
@@ -104,6 +105,12 @@ class AlphaHandler(BaseHTTPRequestHandler):
                             {"path": "/recovery", "screen": "recovery_load"},
                             {"path": "/chat", "screen": "chat_context"},
                         ],
+                        "api": [
+                            "/api/health",
+                            "/api/alpha/shell/today",
+                            "/api/alpha/shell/YYYY-MM-DD",
+                            "/api/alpha/workout/latest",
+                        ],
                     },
                 )
 
@@ -122,6 +129,12 @@ class AlphaHandler(BaseHTTPRequestHandler):
                     return _json(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "no_data_for_day"})
                 return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
 
+            if path == "/api/alpha/workout/latest":
+                q = parse_qs(parsed.query)
+                day = (q.get("day") or [None])[0]
+                payload = build_latest_workout_review(day=day)
+                return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
+
             return _json(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "not_found"})
 
         # Frontend static routes
@@ -129,7 +142,7 @@ class AlphaHandler(BaseHTTPRequestHandler):
             return
 
         # Simple SPA fallback
-        if path in ["/recovery", "/chat"] and self._serve_frontend("/"):
+        if path in ["/recovery", "/chat", "/workout"] and self._serve_frontend("/"):
             return
 
         return _text(self, HTTPStatus.NOT_FOUND, "Not found")
