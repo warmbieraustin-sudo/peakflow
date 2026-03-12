@@ -12,7 +12,8 @@ from urllib.parse import parse_qs, urlparse
 
 from peakflow.pwa_contract import build_alpha_shell_payload
 from peakflow.workout_review import build_latest_workout_review
-from peakflow.planner import SUPPORTED_SPORTS, build_daily_recommendation
+from peakflow.intervals import IntervalsClient
+from peakflow.planner import SUPPORTED_SPORTS, build_daily_recommendation, build_horizon_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT.parent / "frontend"
@@ -115,6 +116,7 @@ class AlphaHandler(BaseHTTPRequestHandler):
                             "/api/alpha/workout/latest",
                             "/api/alpha/planner/modalities",
                             "/api/alpha/planner/recommendation?sport=cycling",
+                            "/api/alpha/planner/horizon?sport=cycling&focusSport=cycling",
                         ],
                     },
                 )
@@ -155,6 +157,21 @@ class AlphaHandler(BaseHTTPRequestHandler):
                 shell = build_alpha_shell_payload(SILVER_DIR, day=day)
                 review = build_latest_workout_review(day=feedback_day)
                 payload = build_daily_recommendation(shell, sport, focus_sport=focus_sport, last_review=review)
+                return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
+
+            if path == "/api/alpha/planner/horizon":
+                q = parse_qs(parsed.query)
+                day = (q.get("day") or [None])[0]
+                sport = (q.get("sport") or ["cycling"])[0]
+                focus_sport = (q.get("focusSport") or [None])[0]
+
+                shell = build_alpha_shell_payload(SILVER_DIR, day=day)
+                icu = IntervalsClient.from_env()
+                newest = date.today().isoformat()
+                oldest = (date.today() - timedelta(days=35)).isoformat()
+                recent_activities = icu.activities(oldest, newest)
+
+                payload = build_horizon_plan(shell, sport, focus_sport=focus_sport, recent_activities=recent_activities)
                 return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
 
             return _json(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "not_found"})

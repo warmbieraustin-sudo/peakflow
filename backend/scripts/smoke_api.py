@@ -66,6 +66,9 @@ def main() -> int:
         status, body = get_json(base + "/api/alpha/planner/recommendation?sport=running", token=args.token or None)
         checks.append(("planner_reco", status == 200 and body.get("ok") is True and (body.get("payload") or {}).get("selected_sport") == "running", status, body))
 
+        status, body = get_json(base + "/api/alpha/planner/horizon?sport=cycling&focusSport=cycling", token=args.token or None)
+        checks.append(("planner_horizon", status == 200 and body.get("ok") is True and ((body.get("payload") or {}).get("horizon") or {}).get("firm_days") == 7, status, body))
+
         # if token mode enabled, verify unauthorized without token
         if args.token:
             status2, body2 = get_json(base + "/api/alpha/shell/today", token=None)

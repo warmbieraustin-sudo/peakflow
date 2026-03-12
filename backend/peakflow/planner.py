@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any, Dict, List, Tuple
 
 SUPPORTED_SPORTS: List[str] = [
@@ -267,4 +268,124 @@ def build_daily_recommendation(
             "review_score": ((last_review or {}).get("analysis") or {}).get("score"),
             "review_confidence": ((last_review or {}).get("analysis") or {}).get("confidence"),
         },
+    }
+
+
+def summarize_recent_load(activities: List[Dict[str, Any]]) -> Dict[str, Any]:
+    rows = sorted(activities or [], key=lambda a: a.get("start_date_local") or "")
+    loads = [float(a.get("icu_training_load") or 0.0) for a in rows]
+    intensities = [float(a.get("icu_intensity") or 0.0) for a in rows]
+
+    last7 = loads[-7:] if len(loads) >= 7 else loads
+    prev21 = loads[-28:-7] if len(loads) >= 28 else loads[:-7]
+
+    last7_total = sum(last7)
+    prev21_weekly_avg = (sum(prev21) / 3.0) if prev21 else (sum(loads) / max(1, len(loads) / 7.0))
+
+    hard_sessions_last7 = sum(1 for i in (intensities[-7:] if intensities else []) if i >= 80)
+    return {
+        "days_considered": len(rows),
+        "last7_load": round(last7_total, 1),
+        "prev21_weekly_avg_load": round(prev21_weekly_avg, 1),
+        "hard_sessions_last7": hard_sessions_last7,
+    }
+
+
+def decide_phase(summary: Dict[str, Any], fresh: bool = True) -> Dict[str, Any]:
+    last7 = float(summary.get("last7_load") or 0.0)
+    prev_avg = float(summary.get("prev21_weekly_avg_load") or 0.0)
+    hard = int(summary.get("hard_sessions_last7") or 0)
+
+    deload_trigger = (prev_avg > 0 and last7 > prev_avg * 1.25) or hard >= 4 or (not fresh and last7 > 0)
+    if deload_trigger:
+        return {
+            "phase": "deload",
+            "reason": "high_recent_load_or_fatigue",
+            "polarization_target": {"easy": 0.9, "hard": 0.1},
+        }
+
+    if prev_avg > 0 and last7 < prev_avg * 0.75:
+        return {
+            "phase": "rebuild",
+            "reason": "underload_recent_block",
+            "polarization_target": {"easy": 0.8, "hard": 0.2},
+        }
+
+    return {
+        "phase": "build",
+        "reason": "normal_progression",
+        "polarization_target": {"easy": 0.8, "hard": 0.2},
+    }
+
+
+def _weekly_intensity_pattern(phase: str) -> List[str]:
+    if phase == "deload":
+        return ["easy", "easy", "easy", "rest", "easy", "moderate", "rest"]
+    if phase == "rebuild":
+        return ["moderate", "easy", "hard", "easy", "moderate", "hard", "rest"]
+    return ["moderate", "easy", "hard", "easy", "moderate", "hard", "easy"]
+
+
+def build_horizon_plan(
+    shell_payload: Dict[str, Any] | None,
+    selected_sport: str,
+    focus_sport: str | None = None,
+    recent_activities: List[Dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    sport = (selected_sport or "cycling").strip().lower()
+    if sport not in SUPPORTED_SPORTS:
+        sport = "cycling"
+
+    morning = ((shell_payload or {}).get("screens") or {}).get("morning_brief") or {}
+    fresh = bool((morning.get("headline") or {}).get("fresh", True))
+
+    summary = summarize_recent_load(recent_activities or [])
+    phase = decide_phase(summary, fresh=fresh)
+    pattern = _weekly_intensity_pattern(phase["phase"])
+
+    start = date.today()
+    days: List[Dict[str, Any]] = []
+    for i in range(28):
+        d = start + timedelta(days=i)
+        intensity = pattern[i % 7]
+        # honor explicit activity selection on day0; default to focus sport cadence later
+        day_sport = sport if i == 0 else (focus_sport or sport)
+
+        if intensity == "rest":
+            plan = {
+                "schema_version": "v1-modality-agnostic",
+                "sport_type": day_sport,
+                "title": "Recovery / Rest",
+                "blocks": [{"label": "recovery", "duration_sec": 1200, "target_type": "rpe", "target_low": 1, "target_high": 2}],
+            }
+        else:
+            t = _templates_for_sport(day_sport, "easy" if intensity == "rest" else intensity)
+            plan = {
+                "schema_version": "v1-modality-agnostic",
+                "sport_type": day_sport,
+                "title": t["title"],
+                "blocks": t["blocks"],
+            }
+
+        days.append(
+            {
+                "date": d.isoformat(),
+                "firm": i < 7,
+                "sport_type": day_sport,
+                "intensity_band": intensity,
+                "plan": plan,
+            }
+        )
+
+    return {
+        "selected_sport": sport,
+        "focus_sport": focus_sport,
+        "horizon": {"firm_days": 7, "soft_days": 28},
+        "periodization": {
+            "phase": phase["phase"],
+            "reason": phase["reason"],
+            "polarization_target": phase["polarization_target"],
+            "recent_load_summary": summary,
+        },
+        "days": days,
     }
