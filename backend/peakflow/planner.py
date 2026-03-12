@@ -161,6 +161,7 @@ def _apply_feedback_adjustments(
     athlete_mode: str,
     intensity: str,
     last_review: Dict[str, Any] | None,
+    athlete_feedback: str | None = None,
 ) -> Dict[str, Any]:
     if not last_review:
         return {
@@ -179,24 +180,42 @@ def _apply_feedback_adjustments(
     next_action = "follow_recommendation"
     modification_reason = "feedback_neutral"
 
-    if score is None:
-        next_action = "collect_execution_data"
-        modification_reason = "missing_score"
-    elif score < 50 or confidence == "low":
+    fb = (athlete_feedback or "").strip().lower()
+    if fb in ("hard", "too_hard", "fatigued"):
         new_intensity = "easy"
         next_action = "reduce_load_and_focus_recovery"
-        modification_reason = "low_score_or_low_confidence"
-    elif score >= 85 and confidence in ("high", "medium") and intensity != "hard":
+        modification_reason = "athlete_reported_too_hard"
+    elif fb in ("easy", "too_easy") and intensity != "hard":
         new_intensity = "moderate"
         next_action = "progress_gradually"
-        modification_reason = "strong_recent_execution"
+        modification_reason = "athlete_reported_too_easy"
+
+    if not fb:
+        if score is None:
+            next_action = "collect_execution_data"
+            modification_reason = "missing_score"
+        elif score < 50 or confidence == "low":
+            new_intensity = "easy"
+            next_action = "reduce_load_and_focus_recovery"
+            modification_reason = "low_score_or_low_confidence"
+        elif score >= 85 and confidence in ("high", "medium") and intensity != "hard":
+            new_intensity = "moderate"
+            next_action = "progress_gradually"
+            modification_reason = "strong_recent_execution"
 
     if "NO_EXECUTION_ACTIVITY" in reasons:
         next_action = "confirm_completion_or_adjust_schedule"
         modification_reason = "no_recent_completed_workout"
 
     # Single-sport protection: keep quality work progression centered on focus sport day.
-    if athlete_mode == "single_sport" and selected_sport == "cycling" and new_intensity == "easy" and score is not None and score >= 70:
+    if (
+        not fb
+        and athlete_mode == "single_sport"
+        and selected_sport == "cycling"
+        and new_intensity == "easy"
+        and score is not None
+        and score >= 70
+    ):
         new_intensity = "moderate"
         modification_reason = "single_sport_progression_protection"
 
@@ -213,6 +232,7 @@ def build_daily_recommendation(
     selected_sport: str,
     focus_sport: str | None = None,
     last_review: Dict[str, Any] | None = None,
+    athlete_feedback: str | None = None,
 ) -> Dict[str, Any]:
     sport = (selected_sport or "cycling").strip().lower()
     if sport not in SUPPORTED_SPORTS:
@@ -229,7 +249,7 @@ def build_daily_recommendation(
     base_intensity = _pick_intensity_band(fresh, daily_load)
 
     athlete_mode = "single_sport" if focus and focus == sport else "multi_sport"
-    adjustment = _apply_feedback_adjustments(sport, athlete_mode, base_intensity, last_review)
+    adjustment = _apply_feedback_adjustments(sport, athlete_mode, base_intensity, last_review, athlete_feedback=athlete_feedback)
     intensity = adjustment["intensity_band"]
 
     template = _templates_for_sport(sport, intensity)
@@ -265,6 +285,7 @@ def build_daily_recommendation(
         "fallback_plan": fallback_plan,
         "feedback_summary": {
             "used": adjustment["feedback_used"],
+            "athlete_feedback": athlete_feedback,
             "review_score": ((last_review or {}).get("analysis") or {}).get("score"),
             "review_confidence": ((last_review or {}).get("analysis") or {}).get("confidence"),
         },
@@ -296,7 +317,8 @@ def decide_phase(summary: Dict[str, Any], fresh: bool = True) -> Dict[str, Any]:
     prev_avg = float(summary.get("prev21_weekly_avg_load") or 0.0)
     hard = int(summary.get("hard_sessions_last7") or 0)
 
-    deload_trigger = (prev_avg > 0 and last7 > prev_avg * 1.25) or hard >= 4 or (not fresh and last7 > 0)
+    # tuned trigger: deload earlier when load spikes or hard-session density is high
+    deload_trigger = (prev_avg > 0 and last7 > prev_avg * 1.2) or hard >= 3 or (not fresh and last7 > 0)
     if deload_trigger:
         return {
             "phase": "deload",

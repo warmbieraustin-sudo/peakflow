@@ -47,6 +47,18 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(rec["next_action"], "reduce_load_and_focus_recovery")
         self.assertTrue(rec["feedback_summary"]["used"])
 
+    def test_explicit_athlete_feedback_overrides(self):
+        last_review = {"analysis": {"score": 95, "confidence": "high", "reason_codes": []}}
+        rec = build_daily_recommendation(
+            {"screens": {"morning_brief": {"headline": {"fresh": True}, "quick_load": {"daily_training_load": 10}}}},
+            "cycling",
+            focus_sport="cycling",
+            last_review=last_review,
+            athlete_feedback="hard",
+        )
+        self.assertEqual(rec["intensity_band"], "easy")
+        self.assertEqual(rec["modification_reason"], "athlete_reported_too_hard")
+
     def test_plan_schema_validation(self):
         valid, reasons = validate_plan_schema(
             {

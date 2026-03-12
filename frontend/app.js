@@ -33,6 +33,7 @@ async function fetchWorkoutReview() {
 
 const SPORT_KEY = 'peakflow_selected_sport';
 const FOCUS_SPORT_KEY = 'peakflow_focus_sport';
+const ATHLETE_FEEDBACK_KEY = 'peakflow_athlete_feedback';
 
 function getSelectedSport() {
   return localStorage.getItem(SPORT_KEY) || 'cycling';
@@ -50,15 +51,32 @@ function setFocusSport(s) {
   localStorage.setItem(FOCUS_SPORT_KEY, s || 'cycling');
 }
 
+function getAthleteFeedback() {
+  return localStorage.getItem(ATHLETE_FEEDBACK_KEY) || '';
+}
+
+function setAthleteFeedback(v) {
+  if (!v) localStorage.removeItem(ATHLETE_FEEDBACK_KEY);
+  else localStorage.setItem(ATHLETE_FEEDBACK_KEY, v);
+}
+
 async function fetchModalities() {
   const r = await apiGet('/api/alpha/planner/modalities');
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.modalities || [];
 }
 
-async function fetchPlanRecommendation(sport, focusSport) {
+async function fetchPlanRecommendation(sport, focusSport, athleteFeedback) {
   const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '' });
+  if (athleteFeedback) qs.set('athleteFeedback', athleteFeedback);
   const r = await apiGet(`/api/alpha/planner/recommendation?${qs.toString()}`);
+  if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
+  return r.body.payload;
+}
+
+async function fetchPlanHorizon(sport, focusSport) {
+  const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '' });
+  const r = await apiGet(`/api/alpha/planner/horizon?${qs.toString()}`);
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.payload;
 }
@@ -171,7 +189,7 @@ function renderWorkout(w) {
   return content;
 }
 
-function renderPlan(modalities, recommendation) {
+function renderPlan(modalities, recommendation, horizon) {
   const options = modalities
     .map((m) => `<option value="${m}" ${m === recommendation.selected_sport ? 'selected' : ''}>${m}</option>`)
     .join('');
@@ -180,12 +198,26 @@ function renderPlan(modalities, recommendation) {
     .map((b) => `<li>${b.label}: ${b.duration_sec}s • ${b.target_type} ${b.target_low ?? '—'}-${b.target_high ?? '—'}</li>`)
     .join('');
 
+  const weekRows = (horizon?.days || [])
+    .slice(0, 7)
+    .map((d) => `<li>${d.date} • ${d.intensity_band} • ${d.sport_type} ${d.firm ? '(firm)' : '(soft)'}</li>`)
+    .join('');
+
+  const fb = getAthleteFeedback();
+
   return `
     <div class="card">
       <div class="label">Today's Activity</div>
       <select id="sportSelect">${options}</select>
       <button id="applySportBtn">Apply</button>
-      <div class="muted">Mode: ${recommendation.athlete_mode} • Intensity: ${recommendation.intensity_band}</div>
+      <div style="margin-top:8px;">
+        <span class="muted">How did yesterday feel?</span>
+        <button id="fbEasyBtn" ${fb === 'easy' ? 'disabled' : ''}>Too Easy</button>
+        <button id="fbOkBtn" ${fb === 'ok' ? 'disabled' : ''}>About Right</button>
+        <button id="fbHardBtn" ${fb === 'hard' ? 'disabled' : ''}>Too Hard</button>
+      </div>
+      <div class="muted">Mode: ${recommendation.athlete_mode} • Intensity: ${recommendation.intensity_band} • Next: ${recommendation.next_action}</div>
+      <div class="muted">Reason: ${recommendation.modification_reason}</div>
     </div>
     <div class="card">
       <div class="label">Recommended Session</div>
@@ -193,17 +225,29 @@ function renderPlan(modalities, recommendation) {
       <div class="muted">sport: ${recommendation.plan?.sport_type || '—'} • schema: ${recommendation.plan?.schema_version || '—'}</div>
       <ul>${blocks}</ul>
     </div>
+    <div class="card">
+      <div class="label">7-Day Firm Horizon</div>
+      <div class="muted">Phase: ${horizon?.periodization?.phase || '—'} • ${horizon?.periodization?.reason || '—'}</div>
+      <ul>${weekRows}</ul>
+    </div>
   `;
 }
 
 function attachPlanHandlers() {
   const select = document.getElementById('sportSelect');
   const btn = document.getElementById('applySportBtn');
-  if (!select || !btn) return;
-  btn.addEventListener('click', async () => {
-    setSelectedSport(select.value);
-    await render();
-  });
+  const fbEasy = document.getElementById('fbEasyBtn');
+  const fbOk = document.getElementById('fbOkBtn');
+  const fbHard = document.getElementById('fbHardBtn');
+  if (select && btn) {
+    btn.addEventListener('click', async () => {
+      setSelectedSport(select.value);
+      await render();
+    });
+  }
+  if (fbEasy) fbEasy.addEventListener('click', async () => { setAthleteFeedback('easy'); await render(); });
+  if (fbOk) fbOk.addEventListener('click', async () => { setAthleteFeedback('ok'); await render(); });
+  if (fbHard) fbHard.addEventListener('click', async () => { setAthleteFeedback('hard'); await render(); });
 }
 
 function routeName() {
@@ -230,11 +274,15 @@ async function render() {
       const workout = await fetchWorkoutReview();
       app.innerHTML = renderWorkout(workout);
     } else if (r === '/plan') {
-      const [modalities, recommendation] = await Promise.all([
+      const selected = getSelectedSport();
+      const focus = getFocusSport();
+      const athleteFeedback = getAthleteFeedback();
+      const [modalities, recommendation, horizon] = await Promise.all([
         fetchModalities(),
-        fetchPlanRecommendation(getSelectedSport(), getFocusSport()),
+        fetchPlanRecommendation(selected, focus, athleteFeedback),
+        fetchPlanHorizon(selected, focus),
       ]);
-      app.innerHTML = renderPlan(modalities, recommendation);
+      app.innerHTML = renderPlan(modalities, recommendation, horizon);
       attachPlanHandlers();
     } else {
       const payload = await fetchPayload();
