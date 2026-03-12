@@ -575,6 +575,139 @@ class LLMClient:
                 "summary": "Keep training consistently"
             }
     
+    def analyze_todays_workout(
+        self,
+        workout_review: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Analyze today's completed workout vs planned workout.
+        
+        Args:
+            workout_review: Full workout review payload (prescription + execution)
+        
+        Returns:
+            Dict with adherence, execution_quality, insights, recommendations
+        """
+        prescription = workout_review.get("prescription", {})
+        execution = workout_review.get("execution", {})
+        
+        # Check if workout was completed
+        if execution.get("status") != "ok":
+            return {
+                "completed": False,
+                "adherence": "not_completed",
+                "execution_quality": None,
+                "insights": ["No workout completed today yet"],
+                "recommendations": ["Complete today's planned workout"],
+                "summary": "Workout not completed"
+            }
+        
+        # Build prompt
+        prompt_parts = ["Analyze today's workout execution vs plan:\n"]
+        
+        # Prescription
+        if prescription.get("status") == "available":
+            source = prescription.get("source", "unknown")
+            title = prescription.get("workout_title", "Workout")
+            prompt_parts.append(f"**Planned workout ({source}):**")
+            prompt_parts.append(f"- Title: {title}")
+            
+            intervals = prescription.get("intervals", [])
+            if intervals:
+                prompt_parts.append(f"- Intervals: {len(intervals)} segments")
+                for i in intervals[:5]:  # Show first 5
+                    duration = i.get("duration_sec", 0) / 60
+                    target = i.get("target_range", "n/a")
+                    prompt_parts.append(f"  - {i.get('label', 'Step')}: {duration:.0f}min @ {target}")
+        else:
+            prompt_parts.append("**Planned workout:** Not available")
+        
+        # Execution
+        activity = execution.get("activity", {})
+        if activity:
+            sport = activity.get("sport_type", "workout")
+            duration_min = activity.get("moving_time", 0) / 60
+            intensity = activity.get("intensity", "unknown")
+            
+            prompt_parts.append(f"\n**Actual execution:**")
+            prompt_parts.append(f"- Sport: {sport}")
+            prompt_parts.append(f"- Duration: {duration_min:.0f}min")
+            prompt_parts.append(f"- Intensity: {intensity}")
+            
+            # Power metrics (if cycling)
+            if sport in ("cycling", "virtualride"):
+                np = activity.get("np")
+                avg_watts = activity.get("average_watts")
+                if np:
+                    prompt_parts.append(f"- Normalized Power: {np:.0f}w")
+                elif avg_watts:
+                    prompt_parts.append(f"- Average Power: {avg_watts:.0f}w")
+                
+                vi = activity.get("variability_index")
+                if vi:
+                    prompt_parts.append(f"- Variability Index: {vi:.2f}")
+            
+            # HR metrics
+            avg_hr = activity.get("average_hr")
+            if avg_hr:
+                prompt_parts.append(f"- Average HR: {avg_hr:.0f}bpm")
+        
+        # Interval matching (if available)
+        match_tier = workout_review.get("match_tier")
+        if match_tier:
+            prompt_parts.append(f"\n**Adherence:** {match_tier}")
+        
+        prompt_parts.append("\nGenerate analysis as JSON:")
+        prompt_parts.append('''{
+  "adherence": "excellent|good|partial|poor",
+  "execution_quality": "excellent|good|average|needs_improvement",
+  "insights": [
+    "<insight about execution vs plan>",
+    "<insight about power/HR/pacing>"
+  ],
+  "recommendations": [
+    "<actionable feedback for next workout>"
+  ],
+  "summary": "<1-2 sentence overall assessment>"
+}''')
+        
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=500,
+                temperature=0.7,
+                system="You are an endurance coach reviewing today's workout. Be specific and actionable.",
+                messages=[{
+                    "role": "user",
+                    "content": "\n".join(prompt_parts)
+                }]
+            )
+            
+            content = response.content[0].text
+            
+            # Extract JSON
+            if "```json" in content:
+                json_str = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                json_str = content.split("```")[1].split("```")[0].strip()
+            else:
+                json_str = content.strip()
+            
+            analysis = json.loads(json_str)
+            analysis["completed"] = True
+            return analysis
+            
+        except Exception as e:
+            print(f"LLM workout analysis failed: {e}")
+            return {
+                "completed": True,
+                "adherence": "unknown",
+                "execution_quality": "unknown",
+                "insights": ["Workout completed"],
+                "recommendations": ["Review execution details"],
+                "summary": "Workout data available"
+            }
+    
     def _fallback_debrief(
         self,
         recovery: Dict[str, Any],

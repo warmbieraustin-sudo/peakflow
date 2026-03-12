@@ -93,6 +93,15 @@ async function fetchLLMAnalysis(forceRefresh = false) {
   };
 }
 
+async function fetchTodaysWorkoutAnalysis() {
+  const r = await apiGet('/api/alpha/llm/workout-analysis/today');
+  if (!r.ok) return null;
+  return {
+    analysis: r.body.analysis,
+    cached: r.body.cached || false
+  };
+}
+
 async function fetchPreferences() {
   const athleteId = getAthleteId();
   const r = await apiGet(`/api/alpha/preferences?athleteId=${encodeURIComponent(athleteId)}`);
@@ -747,7 +756,7 @@ function renderPlan(horizon) {
   `;
 }
 
-function renderAnalysis(data) {
+function renderAnalysis(data, workoutData) {
   if (!data || !data.insights) {
     return `
       <div class="card">
@@ -773,8 +782,95 @@ function renderAnalysis(data) {
   const recommendations = (insights.recommendations || []).map(i => 
     `<li>${i}</li>`
   ).join('');
+  
+  // Today's workout analysis section
+  let workoutSection = '';
+  if (workoutData && workoutData.analysis) {
+    const wa = workoutData.analysis;
+    const completed = wa.completed !== false;
+    
+    if (completed) {
+      const adherenceColor = 
+        wa.adherence === 'excellent' ? '#10b981' :
+        wa.adherence === 'good' ? '#4a9eff' :
+        wa.adherence === 'partial' ? '#f59e0b' : '#ef4444';
+      
+      const qualityColor =
+        wa.execution_quality === 'excellent' ? '#10b981' :
+        wa.execution_quality === 'good' ? '#4a9eff' :
+        wa.execution_quality === 'average' ? '#f59e0b' : '#ef4444';
+      
+      const waInsights = (wa.insights || []).map(i => `<li>${i}</li>`).join('');
+      const waRecs = (wa.recommendations || []).map(i => `<li>${i}</li>`).join('');
+      
+      workoutSection = `
+        <div class="card">
+          <div class="label">Today's Workout Analysis</div>
+          <div class="value" style="font-size: 16px; margin-top: 8px;">${wa.summary || 'Workout completed'}</div>
+          
+          <div style="display: flex; gap: 12px; margin-top: 16px;">
+            <div style="flex: 1;">
+              <div class="muted" style="font-size: 12px; margin-bottom: 4px;">Adherence</div>
+              <div style="
+                display: inline-block;
+                padding: 6px 12px;
+                background: ${adherenceColor};
+                color: white;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 600;
+                text-transform: capitalize;
+              ">${wa.adherence || 'unknown'}</div>
+            </div>
+            
+            ${wa.execution_quality ? `
+              <div style="flex: 1;">
+                <div class="muted" style="font-size: 12px; margin-bottom: 4px;">Execution Quality</div>
+                <div style="
+                  display: inline-block;
+                  padding: 6px 12px;
+                  background: ${qualityColor};
+                  color: white;
+                  border-radius: 6px;
+                  font-size: 13px;
+                  font-weight: 600;
+                  text-transform: capitalize;
+                ">${wa.execution_quality.replace('_', ' ')}</div>
+              </div>
+            ` : ''}
+          </div>
+          
+          ${waInsights ? `
+            <div style="margin-top: 16px;">
+              <div class="muted" style="font-size: 12px; margin-bottom: 8px; font-weight: 600;">Insights</div>
+              <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+                ${waInsights}
+              </ul>
+            </div>
+          ` : ''}
+          
+          ${waRecs ? `
+            <div style="margin-top: 12px;">
+              <div class="muted" style="font-size: 12px; margin-bottom: 8px; font-weight: 600;">Recommendations</div>
+              <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+                ${waRecs}
+              </ul>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    } else {
+      workoutSection = `
+        <div class="card">
+          <div class="label">Today's Workout Analysis</div>
+          <div class="muted" style="padding: 20px;">No workout completed today yet.</div>
+        </div>
+      `;
+    }
+  }
 
   return `
+    ${workoutSection}
     <div class="card">
       <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
         <div style="flex: 1;">
@@ -1106,9 +1202,10 @@ async function render() {
       const horizon = await fetchPlanHorizon(selected, focus, athleteId, coachMode);
       app.innerHTML = renderPlan(horizon);
     } else if (r === '/analysis') {
-      // Analysis = performance and recovery trend insights
+      // Analysis = performance and recovery trend insights + today's workout
       const data = await fetchLLMAnalysis();
-      app.innerHTML = renderAnalysis(data);
+      const workoutData = await fetchTodaysWorkoutAnalysis();
+      app.innerHTML = renderAnalysis(data, workoutData);
       attachAnalysisHandlers();
     } else if (r === '/preferences') {
       // Preferences page

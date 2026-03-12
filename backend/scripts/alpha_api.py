@@ -209,6 +209,7 @@ class AlphaHandler(BaseHTTPRequestHandler):
                             "/api/alpha/llm/explain-workout?sport=cycling&athleteId=default",
                             "/api/alpha/llm/weekly-plan?startDate=2026-03-12&athleteId=default",
                             "/api/alpha/llm/analysis",
+                            "/api/alpha/llm/workout-analysis/today",
                             "/api/alpha/preferences?athleteId=default",
                         ],
                         "post": [
@@ -559,6 +560,70 @@ class AlphaHandler(BaseHTTPRequestHandler):
                     return _json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {
                         "ok": False,
                         "error": "llm_plan_failed",
+                        "detail": str(e)
+                    })
+
+            if path == "/api/alpha/llm/workout-analysis/today":
+                try:
+                    from peakflow.llm_cache import LLMCache
+                    
+                    cache = LLMCache()
+                    today = date.today().isoformat()
+                    
+                    # Check cache first
+                    athlete_id = "default"  # TODO: get from query param
+                    cache_key = f"workout_analysis_{athlete_id}_{today}"
+                    cached_file = cache._cache_file("workout_analysis", cache_key)
+                    
+                    if cached_file.exists():
+                        try:
+                            import json
+                            with open(cached_file, 'r') as f:
+                                cached_data = json.load(f)
+                            if cached_data.get("date") == today:
+                                return _json(self, HTTPStatus.OK, {
+                                    "ok": True,
+                                    "analysis": cached_data.get("analysis"),
+                                    "cached": True
+                                })
+                        except Exception:
+                            pass
+                    
+                    # Generate new analysis
+                    workout_review = build_latest_workout_review(day=today)
+                    
+                    if not workout_review:
+                        return _json(self, HTTPStatus.NOT_FOUND, {
+                            "ok": False,
+                            "error": "no_workout_data"
+                        })
+                    
+                    llm = LLMClient()
+                    analysis = llm.analyze_todays_workout(workout_review)
+                    
+                    # Cache the result
+                    try:
+                        import json
+                        cached_file.parent.mkdir(parents=True, exist_ok=True)
+                        with open(cached_file, 'w') as f:
+                            json.dump({
+                                "date": today,
+                                "analysis": analysis,
+                                "generated_at": datetime.utcnow().isoformat() + "Z"
+                            }, f, indent=2)
+                    except Exception:
+                        pass
+                    
+                    return _json(self, HTTPStatus.OK, {
+                        "ok": True,
+                        "analysis": analysis,
+                        "cached": False
+                    })
+                    
+                except Exception as e:
+                    return _json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "ok": False,
+                        "error": "workout_analysis_failed",
                         "detail": str(e)
                     })
 
