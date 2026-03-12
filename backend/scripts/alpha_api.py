@@ -206,6 +206,7 @@ class AlphaHandler(BaseHTTPRequestHandler):
                             "/api/alpha/planner/recommendation?sport=cycling&coachMode=true",
                             "/api/alpha/planner/horizon?sport=cycling&focusSport=cycling",
                             "/api/alpha/llm/debrief/today",
+                            "/api/alpha/llm/explain-workout?sport=cycling&athleteId=default",
                         ],
                     },
                 )
@@ -350,6 +351,50 @@ class AlphaHandler(BaseHTTPRequestHandler):
                     payload = build_horizon_plan(shell, sport, focus_sport=focus_sport, recent_activities=recent_activities)
                 payload["athlete_id"] = athlete_id
                 return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
+
+            if path == "/api/alpha/llm/explain-workout":
+                try:
+                    q = parse_qs(parsed.query)
+                    athlete_id = (q.get('athleteId') or ['default'])[0]
+                    sport = (q.get('sport') or ['cycling'])[0]
+                    coach_mode_q = (q.get('coachMode') or [None])[0]
+                    coach_mode = (coach_mode_q or '').strip().lower() in ('1', 'true', 'yes') if coach_mode_q else False
+                    
+                    # Get current state
+                    saved = _get_athlete_state(athlete_id)
+                    athlete_feedback = saved.get('athlete_feedback')
+                    
+                    # Get recommendation
+                    shell = build_alpha_shell_payload(SILVER_DIR, day=None)
+                    if coach_mode:
+                        recommendation = build_coach_mode_recommendation(shell, sport, athlete_feedback=athlete_feedback)
+                    else:
+                        recommendation = build_daily_recommendation(shell, sport, athlete_feedback=athlete_feedback)
+                    
+                    # Get recovery and load
+                    recovery_raw = shell.get('screens', {}).get('recovery_load', {}).get('recovery', {})
+                    load_raw = shell.get('screens', {}).get('recovery_load', {}).get('load', {})
+                    
+                    # Generate explanation
+                    llm = LLMClient()
+                    explanation = llm.explain_workout(
+                        recommendation=recommendation,
+                        recovery=recovery_raw,
+                        load=load_raw,
+                        recent_feedback=athlete_feedback
+                    )
+                    
+                    return _json(self, HTTPStatus.OK, {
+                        "ok": True,
+                        "explanation": explanation
+                    })
+                    
+                except Exception as e:
+                    return _json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "ok": False,
+                        "error": "llm_explanation_failed",
+                        "detail": str(e)
+                    })
 
             if path == "/api/alpha/llm/debrief/today":
                 try:

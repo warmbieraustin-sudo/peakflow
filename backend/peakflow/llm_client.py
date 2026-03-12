@@ -138,6 +138,72 @@ class LLMClient:
         
         return "\n".join(prompt_parts)
     
+    def explain_workout(
+        self,
+        recommendation: Dict[str, Any],
+        recovery: Dict[str, Any],
+        load: Optional[Dict[str, Any]] = None,
+        recent_feedback: Optional[str] = None
+    ) -> str:
+        """
+        Generate workout explanation using LLM.
+        
+        Args:
+            recommendation: Today's workout recommendation
+            recovery: Current recovery metrics
+            load: Training load (CTL/ATL/TSB)
+            recent_feedback: Recent athlete feedback (easy/ok/hard)
+        
+        Returns:
+            Natural language explanation of why this workout was chosen
+        """
+        
+        prompt_parts = ["Explain why this workout was recommended:\n"]
+        
+        # Workout details
+        workout_title = recommendation.get('plan', {}).get('title', 'session')
+        intensity = recommendation.get('intensity_band', 'moderate')
+        prompt_parts.append(f"**Workout:** {workout_title} ({intensity} intensity)")
+        
+        # Recovery context
+        if 'sleep_score' in recovery:
+            prompt_parts.append(f"**Recovery:** Sleep {recovery['sleep_score']}/100")
+        if 'hrv' in recovery:
+            prompt_parts.append(f", HRV {recovery['hrv']}ms")
+        
+        # Load context
+        if load and 'ctl' in load and 'atl' in load:
+            tsb = load.get('ctl', 0) - load.get('atl', 0)
+            prompt_parts.append(f"\n**Load:** CTL {load['ctl']:.1f}, ATL {load['atl']:.1f}, TSB {tsb:.1f}")
+        
+        # Feedback context
+        if recent_feedback:
+            prompt_parts.append(f"\n**Recent feedback:** Yesterday felt {recent_feedback}")
+        
+        # Coach mode context
+        if recommendation.get('plan_source') == 'trainingpeaks':
+            prompt_parts.append("\n**Note:** This workout comes from your TrainingPeaks plan.")
+        
+        prompt_parts.append("\n\nProvide a 2-3 sentence coaching explanation in plain text (no JSON).")
+        
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=200,
+                temperature=0.7,
+                system="You are a professional endurance coach explaining workout choices to an athlete. Be concise, supportive, and connect the workout to their current state.",
+                messages=[{
+                    "role": "user",
+                    "content": "\n".join(prompt_parts)
+                }]
+            )
+            
+            return response.content[0].text.strip()
+            
+        except Exception as e:
+            print(f"LLM workout explanation failed: {e}")
+            return f"This {intensity} intensity session is appropriate given your current recovery and training load."
+    
     def _fallback_debrief(
         self,
         recovery: Dict[str, Any],

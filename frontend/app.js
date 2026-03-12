@@ -47,6 +47,17 @@ async function fetchLLMDebrief() {
   return r.body.debrief;
 }
 
+async function fetchLLMWorkoutExplanation(sport, athleteId, coachMode) {
+  const qs = new URLSearchParams({
+    sport: sport || 'cycling',
+    athleteId: athleteId || 'default',
+    coachMode: coachMode ? 'true' : 'false'
+  });
+  const r = await apiGet(`/api/alpha/llm/explain-workout?${qs.toString()}`);
+  if (!r.ok) return null;
+  return r.body.explanation;
+}
+
 const SPORT_KEY = 'peakflow_selected_sport';
 const FOCUS_SPORT_KEY = 'peakflow_focus_sport';
 const ATHLETE_FEEDBACK_KEY = 'peakflow_athlete_feedback';
@@ -385,7 +396,7 @@ function renderRecovery(p, review, llmDebrief) {
   `;
 }
 
-function renderTodayWorkout(modalities, recommendation) {
+function renderTodayWorkout(modalities, recommendation, llmExplanation) {
   const options = modalities
     .map((m) => `<option value="${m}" ${m === recommendation.selected_sport ? 'selected' : ''}>${m}</option>`)
     .join('');
@@ -434,17 +445,16 @@ function renderTodayWorkout(modalities, recommendation) {
     </div>
 
     <div class="card">
-      <div class="label">Why This</div>
-      <div class="muted" style="line-height: 1.6;">${recommendation.coach_explanation?.summary || 'Adaptive recommendation based on load, recovery, and feedback.'}</div>
+      <div class="label">Why This Workout</div>
+      <div class="muted" style="line-height: 1.6;">${llmExplanation || recommendation.coach_explanation?.summary || 'Adaptive recommendation based on load, recovery, and feedback.'}</div>
       ${advanced && recommendation.coach_explanation?.recommended_overlay ? `
         <div class="muted" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
           Overlay: ${recommendation.coach_explanation.recommended_overlay.next_action} • ${recommendation.coach_explanation.recommended_overlay.modification_reason}
         </div>` : ''}
-    </div>
-
-    <div class="muted" style="margin-top: 16px;">
-      Mode: ${recommendation.athlete_mode} • Intensity: ${recommendation.intensity_band} • Next: ${recommendation.next_action}
-      <br>Reason: ${recommendation.modification_reason}
+      ${advanced ? `<div class="muted" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+        Mode: ${recommendation.athlete_mode} • Intensity: ${recommendation.intensity_band} • Next: ${recommendation.next_action}
+        <br>Reason: ${recommendation.modification_reason}
+      </div>` : ''}
     </div>
   `;
 }
@@ -694,11 +704,12 @@ async function render() {
       if (athleteFeedback) setAthleteFeedback(athleteFeedback);
       setCoachMode(coachMode);
 
-      const [modalities, recommendation] = await Promise.all([
+      const [modalities, recommendation, llmExplanation] = await Promise.all([
         fetchModalities(),
         fetchPlanRecommendation(selected, focus, athleteFeedback, coachMode, athleteId),
+        fetchLLMWorkoutExplanation(selected, athleteId, coachMode),
       ]);
-      app.innerHTML = renderTodayWorkout(modalities, recommendation);
+      app.innerHTML = renderTodayWorkout(modalities, recommendation, llmExplanation);
       attachTodayWorkoutHandlers();
     } else if (r === '/plan') {
       // Plan = 7-day calendar view
