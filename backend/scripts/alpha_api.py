@@ -611,42 +611,55 @@ class AlphaHandler(BaseHTTPRequestHandler):
             if path == "/api/alpha/llm/workout-analysis/today":
                 try:
                     from peakflow.llm_cache import LLMCache
-                    
+
+                    q = parse_qs(parsed.query)
+                    athlete_id = (q.get('athleteId') or ['default'])[0]
+                    force_refresh = (q.get('refresh') or ['false'])[0].lower() in ('true', '1', 'yes')
+
                     cache = LLMCache()
                     today = date.today().isoformat()
-                    
-                    # Check cache first
-                    athlete_id = "default"  # TODO: get from query param
                     cache_key = f"workout_analysis_{athlete_id}_{today}"
                     cached_file = cache._cache_file("workout_analysis", cache_key)
-                    
-                    if cached_file.exists():
-                        try:
-                            import json
-                            with open(cached_file, 'r') as f:
-                                cached_data = json.load(f)
-                            if cached_data.get("date") == today:
-                                return _json(self, HTTPStatus.OK, {
-                                    "ok": True,
-                                    "analysis": cached_data.get("analysis"),
-                                    "cached": True
-                                })
-                        except Exception:
-                            pass
-                    
-                    # Generate new analysis
+
+                    # Build latest review first so we can detect new uploads vs stale cache
                     workout_review = build_latest_workout_review(day=today)
-                    
                     if not workout_review:
                         return _json(self, HTTPStatus.NOT_FOUND, {
                             "ok": False,
                             "error": "no_workout_data"
                         })
-                    
+
+                    activity = ((workout_review.get("execution") or {}).get("activity") or {})
+                    fingerprint = {
+                        "activity_id": activity.get("id"),
+                        "start_date_local": activity.get("start_date_local"),
+                        "moving_time_sec": activity.get("moving_time_sec"),
+                        "training_load": activity.get("training_load"),
+                    }
+
+                    # Check cache first, but invalidate if workout fingerprint changed
+                    if cached_file.exists() and not force_refresh:
+                        try:
+                            import json
+                            with open(cached_file, 'r') as f:
+                                cached_data = json.load(f)
+
+                            if cached_data.get("date") == today:
+                                cached_fp = cached_data.get("fingerprint") or {}
+                                if cached_fp == fingerprint:
+                                    return _json(self, HTTPStatus.OK, {
+                                        "ok": True,
+                                        "analysis": cached_data.get("analysis"),
+                                        "cached": True
+                                    })
+                        except Exception:
+                            pass
+
+                    # Generate new analysis
                     llm = LLMClient()
                     analysis = llm.analyze_todays_workout(workout_review)
-                    
-                    # Cache the result
+
+                    # Cache the result with workout fingerprint
                     try:
                         import json
                         cached_file.parent.mkdir(parents=True, exist_ok=True)
@@ -654,17 +667,18 @@ class AlphaHandler(BaseHTTPRequestHandler):
                             json.dump({
                                 "date": today,
                                 "analysis": analysis,
+                                "fingerprint": fingerprint,
                                 "generated_at": datetime.utcnow().isoformat() + "Z"
                             }, f, indent=2)
                     except Exception:
                         pass
-                    
+
                     return _json(self, HTTPStatus.OK, {
                         "ok": True,
                         "analysis": analysis,
                         "cached": False
                     })
-                    
+
                 except Exception as e:
                     return _json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {
                         "ok": False,
