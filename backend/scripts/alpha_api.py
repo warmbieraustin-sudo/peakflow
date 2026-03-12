@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,6 +29,8 @@ ALPHA_TOKEN = os.environ.get("PEAKFLOW_ALPHA_TOKEN", "").strip()
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PLANNER_STATE_PATH = ROOT / "data" / "app-state" / "planner_state.json"
 PLANNER_FEEDBACK_LOG = ROOT / "data" / "app-state" / "reco_feedback.jsonl"
+FEEDBACK_SCHEMA_VERSION = "v1"
+MAX_FEEDBACK_ROWS = int(os.environ.get("PEAKFLOW_MAX_FEEDBACK_ROWS", "5000"))
 
 
 def _load_planner_state() -> dict:
@@ -59,15 +61,26 @@ def _upsert_athlete_state(athlete_id: str, updates: dict) -> dict:
     return row
 
 
+def _prune_feedback_log() -> None:
+    if not PLANNER_FEEDBACK_LOG.exists():
+        return
+    lines = PLANNER_FEEDBACK_LOG.read_text().splitlines()
+    if len(lines) <= MAX_FEEDBACK_ROWS:
+        return
+    kept = lines[-MAX_FEEDBACK_ROWS:]
+    PLANNER_FEEDBACK_LOG.write_text("\n".join(kept) + "\n")
+
+
 def _append_feedback_row(row: dict) -> None:
     PLANNER_FEEDBACK_LOG.parent.mkdir(parents=True, exist_ok=True)
     with PLANNER_FEEDBACK_LOG.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row) + "\n")
+    _prune_feedback_log()
 
 
 def _feedback_summary() -> dict:
     if not PLANNER_FEEDBACK_LOG.exists():
-        return {"count": 0, "avg_relevance": None}
+        return {"count": 0, "avg_relevance": None, "schema_version": FEEDBACK_SCHEMA_VERSION}
     rows = []
     for line in PLANNER_FEEDBACK_LOG.read_text().splitlines():
         line = line.strip()
@@ -78,9 +91,18 @@ def _feedback_summary() -> dict:
         except Exception:
             continue
     rel = [r.get("relevance") for r in rows if isinstance(r.get("relevance"), (int, float))]
+    perceived = {}
+    for r in rows:
+        p = r.get("perceived")
+        if not p:
+            continue
+        perceived[p] = perceived.get(p, 0) + 1
     return {
         "count": len(rows),
         "avg_relevance": round(sum(rel) / len(rel), 2) if rel else None,
+        "schema_version": FEEDBACK_SCHEMA_VERSION,
+        "max_rows": MAX_FEEDBACK_ROWS,
+        "perceived_counts": perceived,
     }
 
 
@@ -231,7 +253,8 @@ class AlphaHandler(BaseHTTPRequestHandler):
                         relevance = None
 
                 row = {
-                    "ts": date.today().isoformat(),
+                    "schema_version": FEEDBACK_SCHEMA_VERSION,
+                    "ts": datetime.now(timezone.utc).isoformat(),
                     "athlete_id": athlete_id,
                     "relevance": relevance,
                     "perceived": perceived,
