@@ -34,8 +34,9 @@ async function fetchPayload() {
   return r.body.payload;
 }
 
-async function fetchWorkoutReview() {
-  const r = await apiGet('/api/alpha/workout/latest');
+async function fetchWorkoutReview(day) {
+  const qs = day ? `?day=${encodeURIComponent(day)}` : '';
+  const r = await apiGet(`/api/alpha/workout/latest${qs}`);
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.payload;
 }
@@ -159,14 +160,48 @@ function renderMorning(p) {
   `;
 }
 
-function renderRecovery(p) {
+function buildDailyDebrief(rec, review) {
+  const sleep = rec?.sleep_score;
+  const hrv = rec?.hrv;
+  const workoutDone = review?.execution?.status === 'ok';
+  const workoutName = review?.execution?.activity?.name || review?.prescription?.workout_title || 'session';
+  const match = review?.analysis?.interval_matching;
+
+  if (typeof sleep === 'number' && sleep >= 85 && workoutDone) {
+    if (match === 'matched' || match === 'partial') {
+      return `You slept well overnight despite yesterday's ${workoutName}. Recovery signals look strong for today.`;
+    }
+    return `You slept well overnight after yesterday's ${workoutName}. Recovery looks solid heading into today.`;
+  }
+
+  if (typeof sleep === 'number' && sleep < 75) {
+    return `Sleep came in lower last night. Keep today's load controlled and prioritize recovery habits.`;
+  }
+
+  if (typeof hrv === 'number' && hrv >= 95) {
+    return `HRV is strong this morning, suggesting good readiness even if yesterday was demanding.`;
+  }
+
+  if (workoutDone) {
+    return `You completed yesterday's ${workoutName}. Today looks like a steady progression day.`;
+  }
+
+  return `Recovery signals are in. Use today's recommendation and check in after training so we can adapt tomorrow.`;
+}
+
+function renderRecovery(p, review) {
   const r = p.screens.recovery_load || {};
   const rec = r.recovery || {};
   const load = r.load || {};
   const act = r.activity_summary || {};
   const sleepHours = rec.sleep_seconds ? (rec.sleep_seconds / 3600).toFixed(1) : '—';
+  const debrief = buildDailyDebrief(rec, review);
 
   return `
+    <div class="card">
+      <div class="label">Daily Debrief</div>
+      <div class="value" style="font-size:16px; line-height:1.4;">${debrief}</div>
+    </div>
     <div class="row">
       ${card('Sleep Score', rec.sleep_score ?? '—')}
       ${card('Sleep Hours', sleepHours)}
@@ -388,6 +423,12 @@ function attachPlanHandlers() {
   });
 }
 
+function getYesterdayISO() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 function routeName() {
   return (location.hash || '#/').replace('#', '');
 }
@@ -443,8 +484,10 @@ async function render() {
       attachPlanHandlers();
     } else {
       const payload = await fetchPayload();
-      if (r === '/recovery') app.innerHTML = renderRecovery(payload);
-      else if (r === '/chat') app.innerHTML = renderChat(payload);
+      if (r === '/recovery') {
+        const yesterdayReview = await fetchWorkoutReview(getYesterdayISO());
+        app.innerHTML = renderRecovery(payload, yesterdayReview);
+      } else if (r === '/chat') app.innerHTML = renderChat(payload);
       else app.innerHTML = renderMorning(payload);
     }
   } catch (e) {
