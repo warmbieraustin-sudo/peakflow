@@ -67,10 +67,10 @@ function renderWorkout(w) {
   const presc = w.prescription;
   const exec = w.execution;
   const analysis = w.analysis;
-  
+
   const prescStatus = presc.status === 'ok' ? '✅ Available' : '⚠️ Unavailable';
   const execStatus = exec.status === 'ok' ? '✅ Completed' : '⚠️ Not done';
-  
+
   let content = `
     <div class="card">
       <h2>${w.date}</h2>
@@ -78,20 +78,27 @@ function renderWorkout(w) {
         ${card('Prescription', prescStatus)}
         ${card('Execution', execStatus)}
       </div>
+      <div class="row">
+        ${card('Match', analysis.interval_matching || '—')}
+        ${card('Score', analysis.score ?? '—')}
+        ${card('Confidence', analysis.confidence || '—')}
+        ${card('Tier', analysis.matching_tier || '—')}
+      </div>
     </div>
   `;
-  
+
   if (presc.status === 'ok') {
     content += `<div class="card">
       <div class="label">Planned Workout</div>
       <div class="value">${presc.workout_title || '—'}</div>
       <div class="row">
         ${card('Planned TSS', presc.planned_tss ?? '—')}
+        ${card('Planned Duration (s)', presc.planned_duration_sec ?? '—')}
         ${card('Intervals', presc.intervals?.length ?? 0)}
       </div>
     </div>`;
   }
-  
+
   if (exec.status === 'ok' && exec.activity) {
     const a = exec.activity;
     content += `<div class="card">
@@ -109,17 +116,26 @@ function renderWorkout(w) {
       </div>
     </div>`;
   }
-  
-  if (analysis.interval_matching === 'matched' && analysis.intervals?.length) {
-    const intervals = analysis.intervals.map(i => 
-      `<div style="margin: 4px 0;">${i.label}: ${i.target_range} → ${i.executed_watts}w ${i.hit ? '✅' : '⚠️'}</div>`
-    ).join('');
+
+  if (analysis.reason_codes?.length) {
+    content += `<div class="card">
+      <div class="label">Reason Codes</div>
+      <pre>${analysis.reason_codes.join('\n')}</pre>
+    </div>`;
+  }
+
+  if (analysis.intervals?.length) {
+    const intervals = analysis.intervals
+      .map(
+        (i) => `<div style="margin: 4px 0;">${i.label}: ${i.target_low}-${i.target_high} (${i.target_type}) → ${i.executed} ${i.hit ? '✅' : '⚠️'}</div>`
+      )
+      .join('');
     content += `<div class="card">
       <div class="label">Interval Matching</div>
       ${intervals}
     </div>`;
   }
-  
+
   return content;
 }
 

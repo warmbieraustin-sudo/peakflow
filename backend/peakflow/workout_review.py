@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -8,7 +9,6 @@ from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-import subprocess
 
 from .config import load_env, require_env
 from .intervals import IntervalsClient
@@ -48,7 +48,6 @@ class TrainingPeaksClient:
             raise RuntimeError(f"TrainingPeaks API connection error: {exc}") from exc
 
     def workouts_for_day(self, day: str) -> List[Dict[str, Any]]:
-        # conservative endpoint shape; if token/endpoint is unavailable in env, caller should fallback
         out = self._get("/workouts", {"startDate": day, "endDate": day})
         if isinstance(out, list):
             return out
@@ -56,7 +55,6 @@ class TrainingPeaksClient:
 
 
 def _tp_workouts_via_script(day: str) -> List[Dict[str, Any]]:
-    """Preferred local TP path in this environment (cookie-auth script)."""
     tp_script = Path.home() / ".openclaw" / "workspace" / "skills" / "trainingpeaks" / "scripts" / "tp.py"
     cmd = ["/opt/homebrew/bin/python3", str(tp_script), "workouts", day, day, "--json"]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -71,35 +69,32 @@ def _tp_workouts_via_script(day: str) -> List[Dict[str, Any]]:
 
 
 def _parse_tp_structure(tp_workout: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Extract interval targets from TP structured workout if present.
-    Handles nested TP API format: structure.structure[].steps[]
-    """
+    """Extract TP intervals from nested structure.structure[].steps[] format."""
     structure_root = tp_workout.get("structure")
     if not structure_root or not isinstance(structure_root, dict):
         return []
-    
+
     structure_items = structure_root.get("structure", [])
     intervals: List[Dict[str, Any]] = []
-    
-    for item_idx, item in enumerate(structure_items):
+
+    for item in structure_items:
         steps = item.get("steps", [])
-        for step_idx, step in enumerate(steps):
+        for step in steps:
             length = step.get("length", {})
             duration_sec = length.get("value") if length.get("unit") == "second" else None
-            
-            targets = step.get("targets", [{}])
-            target = targets[0] if targets else {}
-            
-            intervals.append({
-                "index": len(intervals),
-                "type": step.get("intensityClass") or "work",
-                "duration_sec": duration_sec,
-                "target_power_low": target.get("minValue"),
-                "target_power_high": target.get("maxValue"),
-                "label": step.get("name"),
-            })
-    
+            target = (step.get("targets") or [{}])[0]
+            intervals.append(
+                {
+                    "index": len(intervals),
+                    "type": step.get("intensityClass") or "work",
+                    "duration_sec": duration_sec,
+                    # TP plans here are typically %FTP, not watts.
+                    "target_type": "power_pct_ftp",
+                    "target_low": target.get("minValue"),
+                    "target_high": target.get("maxValue"),
+                    "label": step.get("name"),
+                }
+            )
     return intervals
 
 
@@ -110,55 +105,204 @@ def _latest_activity(activities: List[Dict[str, Any]]) -> Optional[Dict[str, Any
     return activities[-1]
 
 
-def _match_intervals(tp_intervals: List[Dict[str, Any]], execution_activity: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _clamp01(v: float) -> float:
+    if v < 0:
+        return 0.0
+    if v > 1:
+        return 1.0
+    return v
+
+
+def _normalize_planned_duration(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except Exception:
+        return None
+    # TP totalTimePlanned can be in hours for some payloads.
+    if 0 < v <= 24:
+        return v * 3600.0
+    return v
+
+
+def _normalize_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     """
-    First-pass interval matching between TP prescription and ICU execution.
-    Returns analysis with match status and per-interval deltas.
+    Normalized plan format for both TP and LLM-generated workouts.
+    LLM expected interval schema supports target_type: power_watts|power_pct_ftp|hr_bpm|rpe.
     """
-    if not tp_intervals or not execution_activity:
-        return {"status": "not_available", "intervals": []}
-    
-    # For now, just flag key work intervals and compare to execution metrics
-    work_intervals = [i for i in tp_intervals if i.get("type") in ["work", "active"]]
-    
-    if not work_intervals:
-        return {"status": "no_work_intervals", "intervals": []}
-    
-    # Simple first-pass: compare planned power targets to execution avg/weighted
-    exec_avg = execution_activity.get("avg_watts")
-    exec_weighted = execution_activity.get("weighted_avg_watts")
-    
-    intervals_analysis = []
-    for interval in work_intervals:
-        target_low = interval.get("target_power_low")
-        target_high = interval.get("target_power_high")
-        
-        if target_low and exec_weighted:
-            # Compare to weighted avg (closer to NP)
-            target_mid = (target_low + (target_high or target_low)) / 2
-            delta = exec_weighted - target_mid
-            hit = abs(delta) <= (target_mid * 0.1)  # within 10%
-            
-            intervals_analysis.append({
-                "label": interval.get("label"),
-                "target_range": f"{target_low}-{target_high or target_low}%",
-                "executed_watts": exec_weighted,
-                "delta_watts": round(delta, 1),
-                "hit": hit,
-            })
-    
-    overall_status = "matched" if intervals_analysis else "pending"
-    
+    intervals = plan.get("intervals") or []
+    norm: List[Dict[str, Any]] = []
+    for idx, i in enumerate(intervals):
+        norm.append(
+            {
+                "index": i.get("index", idx),
+                "type": i.get("type", "work"),
+                "label": i.get("label") or f"interval_{idx+1}",
+                "duration_sec": i.get("duration_sec"),
+                "target_type": i.get("target_type", "power_pct_ftp"),
+                "target_low": i.get("target_low"),
+                "target_high": i.get("target_high"),
+            }
+        )
     return {
-        "status": overall_status,
-        "intervals": intervals_analysis,
+        "source": plan.get("source", "unknown"),
+        "title": plan.get("title"),
+        "planned_duration_sec": _normalize_planned_duration(plan.get("planned_duration_sec")),
+        "planned_tss": plan.get("planned_tss"),
+        "intervals": norm,
+    }
+
+
+def _choose_matching_tier(plan: Dict[str, Any], execution: Optional[Dict[str, Any]]) -> str:
+    if not execution:
+        return "none"
+    has_hr = execution.get("avg_hr") is not None
+    has_power = execution.get("weighted_avg_watts") is not None
+    has_duration = execution.get("moving_time_sec") is not None
+
+    plan_targets = {i.get("target_type") for i in plan.get("intervals", [])}
+    if has_power and has_hr and ("power_watts" in plan_targets or "power_pct_ftp" in plan_targets):
+        return "power_hr"
+    if has_hr and ("hr_bpm" in plan_targets or "power_pct_ftp" in plan_targets or "rpe" in plan_targets):
+        return "hr_only"
+    if has_duration:
+        return "duration_only"
+    return "none"
+
+
+def _duration_score(plan: Dict[str, Any], execution: Dict[str, Any]) -> float:
+    planned = plan.get("planned_duration_sec")
+    actual = execution.get("moving_time_sec")
+    if not planned or not actual:
+        return 0.5
+    ratio = actual / float(planned)
+    # Full score from 90%-110%, then taper.
+    if 0.9 <= ratio <= 1.1:
+        return 1.0
+    return _clamp01(1.0 - abs(ratio - 1.0))
+
+
+def _interval_compliance(plan: Dict[str, Any], execution: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Session-level prototype: compare interval targets against available session metrics."""
+    out: List[Dict[str, Any]] = []
+    exec_watts = execution.get("weighted_avg_watts")
+    exec_hr = execution.get("avg_hr")
+    exec_intensity = execution.get("intensity")
+
+    for i in plan.get("intervals", []):
+        ttype = i.get("target_type")
+        low = i.get("target_low")
+        high = i.get("target_high") or low
+        if low is None:
+            continue
+
+        executed = None
+        delta = None
+        hit = None
+
+        if ttype == "power_watts" and exec_watts is not None:
+            executed = exec_watts
+            target_mid = (low + high) / 2.0
+            delta = executed - target_mid
+            hit = abs(delta) <= target_mid * 0.1
+        elif ttype == "power_pct_ftp" and exec_intensity is not None:
+            executed = exec_intensity
+            target_mid = (low + high) / 2.0
+            delta = executed - target_mid
+            hit = abs(delta) <= 10.0
+        elif ttype == "hr_bpm" and exec_hr is not None:
+            executed = exec_hr
+            target_mid = (low + high) / 2.0
+            delta = executed - target_mid
+            hit = abs(delta) <= 8.0
+
+        if executed is not None:
+            out.append(
+                {
+                    "label": i.get("label"),
+                    "target_type": ttype,
+                    "target_low": low,
+                    "target_high": high,
+                    "executed": round(float(executed), 1),
+                    "delta": round(float(delta), 1) if delta is not None else None,
+                    "hit": bool(hit),
+                }
+            )
+
+    return out
+
+
+def evaluate_plan_execution(plan: Dict[str, Any], execution_activity: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    normalized = _normalize_plan(plan)
+    reason_codes: List[str] = []
+
+    if not execution_activity:
+        return {
+            "matching_tier": "none",
+            "interval_matching": "not_available",
+            "score": None,
+            "confidence": "low",
+            "reason_codes": ["NO_EXECUTION_ACTIVITY"],
+            "intervals": [],
+        }
+
+    tier = _choose_matching_tier(normalized, execution_activity)
+    duration = _duration_score(normalized, execution_activity)
+    interval_rows = _interval_compliance(normalized, execution_activity)
+
+    interval_score = None
+    if interval_rows:
+        hits = sum(1 for r in interval_rows if r.get("hit"))
+        interval_score = hits / float(len(interval_rows))
+    else:
+        reason_codes.append("NO_COMPARABLE_INTERVAL_TARGETS")
+
+    if tier == "power_hr":
+        if interval_score is None:
+            score = duration * 0.6
+            confidence = "medium"
+        else:
+            score = 0.65 * interval_score + 0.35 * duration
+            confidence = "high"
+            reason_codes.append("SESSION_LEVEL_POWER_MATCH")
+    elif tier == "hr_only":
+        if interval_score is None:
+            score = duration * 0.7
+        else:
+            score = 0.55 * interval_score + 0.45 * duration
+        confidence = "medium"
+        reason_codes.append("HR_OR_INTENSITY_FALLBACK")
+    elif tier == "duration_only":
+        score = duration
+        confidence = "low"
+        reason_codes.append("DURATION_ONLY_MATCH")
+    else:
+        score = duration * 0.5
+        confidence = "low"
+        reason_codes.append("INSUFFICIENT_EXECUTION_SIGNALS")
+
+    score_100 = round(score * 100.0, 1)
+    if score_100 >= 80:
+        match_label = "matched"
+    elif score_100 >= 50:
+        match_label = "partial"
+    else:
+        match_label = "missed"
+
+    return {
+        "matching_tier": tier,
+        "interval_matching": match_label,
+        "score": score_100,
+        "confidence": confidence,
+        "reason_codes": reason_codes,
+        "intervals": interval_rows,
     }
 
 
 def build_latest_workout_review(day: str | None = None) -> Dict[str, Any]:
     target_day = day or date.today().isoformat()
 
-    # 1) Prescription source first (TP)
     tp_data: Dict[str, Any] = {
         "source": "trainingpeaks",
         "day": target_day,
@@ -167,9 +311,7 @@ def build_latest_workout_review(day: str | None = None) -> Dict[str, Any]:
         "intervals": [],
     }
 
-    tp_available = False
     try:
-        # Preferred in this workspace: tp.py script (cookie auth)
         tp_workouts = _tp_workouts_via_script(target_day)
         if tp_workouts:
             w = tp_workouts[0]
@@ -181,17 +323,16 @@ def build_latest_workout_review(day: str | None = None) -> Dict[str, Any]:
                     "workout_title": w.get("title") or w.get("name"),
                     "intervals": _parse_tp_structure(w),
                     "planned_tss": w.get("plannedTss") or w.get("tssPlanned"),
-                    "planned_duration_sec": w.get("plannedDurationSeconds") or w.get("durationSeconds") or w.get("totalTimePlanned"),
+                    "planned_duration_sec": _normalize_planned_duration(
+                        w.get("plannedDurationSeconds") or w.get("durationSeconds") or w.get("totalTimePlanned")
+                    ),
                 }
             )
-            tp_available = True
         else:
             tp_data["status"] = "empty"
     except Exception:
-        # Silent fallback - TP unavailable is expected in many environments
         tp_data["status"] = "unavailable"
 
-    # 2) Execution source (Intervals)
     icu = IntervalsClient.from_env()
     activities = icu.activities(target_day, target_day)
     latest = _latest_activity(activities)
@@ -217,23 +358,30 @@ def build_latest_workout_review(day: str | None = None) -> Dict[str, Any]:
             "calories": latest.get("calories"),
         }
 
-    # 3) Interval matching analysis
-    interval_analysis = _match_intervals(tp_data.get("intervals", []), execution.get("activity"))
-    
-    # 4) Review contract
-    review = {
+    plan = {
+        "source": "trainingpeaks",
+        "title": tp_data.get("workout_title"),
+        "planned_duration_sec": tp_data.get("planned_duration_sec"),
+        "planned_tss": tp_data.get("planned_tss"),
+        "intervals": tp_data.get("intervals", []),
+    }
+    analysis = evaluate_plan_execution(plan, execution.get("activity"))
+
+    return {
         "date": target_day,
         "prescription": tp_data,
         "execution": execution,
         "analysis": {
             "prescription_available": tp_data.get("status") == "ok",
             "execution_available": execution.get("status") == "ok",
-            "interval_matching": interval_analysis.get("status", "not_available"),
-            "intervals": interval_analysis.get("intervals", []),
+            "interval_matching": analysis.get("interval_matching", "not_available"),
+            "matching_tier": analysis.get("matching_tier", "none"),
+            "score": analysis.get("score"),
+            "confidence": analysis.get("confidence", "low"),
+            "reason_codes": analysis.get("reason_codes", []),
+            "intervals": analysis.get("intervals", []),
         },
         "fallbacks": {
             "garmin_fallback_required": execution.get("status") != "ok",
         },
     }
-
-    return review
