@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://peakflow.local/schemas/activity.schema.json",
+  "title": "PeakFlow activity",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "type",
+    "start_date_local",
+    "moving_time_sec",
+    "distance_m",
+    "avg_hr",
+    "max_hr",
+    "weighted_avg_watts",
+    "training_load",
+    "intensity",
+    "decoupling",
+    "kj",
+    "calories",
+    "source_updated"
+  ],
+  "properties": {
+    "id": { "type": ["string", "null"] },
+    "name": { "type": ["string", "null"] },
+    "type": { "type": ["string", "null"] },
+    "start_date_local": { "type": ["string", "null"] },
+    "moving_time_sec": { "type": ["number", "null"] },
+    "distance_m": { "type": ["number", "null"] },
+    "avg_hr": { "type": ["number", "null"] },
+    "max_hr": { "type": ["number", "null"] },
+    "weighted_avg_watts": { "type": ["number", "null"] },
+    "training_load": { "type": ["number", "null"] },
+    "intensity": { "type": ["number", "null"] },
+    "decoupling": { "type": ["number", "null"] },
+    "kj": { "type": ["number", "null"] },
+    "calories": { "type": ["number", "null"] },
+    "source_updated": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

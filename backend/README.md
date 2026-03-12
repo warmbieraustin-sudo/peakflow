@@ -55,4 +55,10 @@ PYTHONPATH=. python3 scripts/check_recovery_freshness.py --fresh-minutes 180
 - Silver activities: `backend/data/silver/activities/YYYY-MM-DD.json`
 
 ## Schemas
-See `backend/docs/SCHEMAS.md`.
+- Human-readable contracts: `backend/docs/SCHEMAS.md`
+- Machine schema files: `backend/schemas/*.schema.json`
+
+## Validation
+```bash
+PYTHONPATH=. python3 scripts/validate_silver.py
+```
