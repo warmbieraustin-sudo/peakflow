@@ -104,3 +104,11 @@ PYTHONPATH=. python3 -m unittest tests/test_query.py -v
 cd backend
 PYTHONPATH=. python3 scripts/smoke_e2e.py
 ```
+
+## PWA alpha shell payload
+```bash
+cd backend
+PYTHONPATH=. python3 scripts/pwa_payload.py --write
+```
+
+Contract doc: `backend/docs/ALPHA_UI_CONTRACT.md`
