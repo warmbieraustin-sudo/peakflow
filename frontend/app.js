@@ -68,10 +68,15 @@ async function fetchLLMWeeklyPlan(startDate, athleteId) {
   return r.body.plan;
 }
 
-async function fetchLLMAnalysis() {
-  const r = await apiGet('/api/alpha/llm/analysis');
+async function fetchLLMAnalysis(forceRefresh = false) {
+  const qs = forceRefresh ? '?refresh=true' : '';
+  const r = await apiGet(`/api/alpha/llm/analysis${qs}`);
   if (!r.ok) return null;
-  return r.body.insights;
+  return {
+    insights: r.body.insights,
+    cached: r.body.cached || false,
+    generated_at: r.body.generated_at
+  };
 }
 
 const SPORT_KEY = 'peakflow_selected_sport';
@@ -701,8 +706,8 @@ function renderPlan(horizon) {
   `;
 }
 
-function renderAnalysis(insights) {
-  if (!insights) {
+function renderAnalysis(data) {
+  if (!data || !data.insights) {
     return `
       <div class="card">
         <div class="label">Analysis Insights</div>
@@ -710,6 +715,11 @@ function renderAnalysis(insights) {
       </div>
     `;
   }
+
+  const insights = data.insights;
+  const cached = data.cached || false;
+  const generatedAt = data.generated_at ? new Date(data.generated_at) : null;
+  const timeAgo = generatedAt ? formatTimeAgo(generatedAt) : '';
 
   const performance = (insights.performance_insights || []).map(i => 
     `<li>${i}</li>`
@@ -725,8 +735,26 @@ function renderAnalysis(insights) {
 
   return `
     <div class="card">
-      <div class="label">14-Day Analysis</div>
-      <div class="value" style="margin-bottom: 16px;">${insights.summary || 'Analysis complete'}</div>
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+        <div style="flex: 1;">
+          <div class="label">14-Day Analysis</div>
+          <div class="value" style="font-size: 16px; margin-top: 8px;">${insights.summary || 'Analysis complete'}</div>
+          ${generatedAt ? `<div class="muted" style="font-size: 12px; margin-top: 8px;">
+            ${cached ? '💾 Cached' : '✨ Fresh'} • Generated ${timeAgo}
+          </div>` : ''}
+        </div>
+        <button id="refreshAnalysisBtn" style="
+          background: var(--accent, #4a9eff);
+          color: white;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          white-space: nowrap;
+        ">Refresh</button>
+      </div>
     </div>
 
     <div class="card">
@@ -750,6 +778,39 @@ function renderAnalysis(insights) {
       </ul>
     </div>
   `;
+}
+
+function formatTimeAgo(date) {
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}min ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+function attachAnalysisHandlers() {
+  const refreshBtn = document.getElementById('refreshAnalysisBtn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = 'Refreshing...';
+      try {
+        const data = await fetchLLMAnalysis(true);  // force refresh
+        const app = document.getElementById('app');
+        app.innerHTML = renderAnalysis(data);
+        attachAnalysisHandlers();  // re-attach after re-render
+      } catch (e) {
+        alert(e.message || 'Refresh failed. Please try again in 6 hours.');
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = 'Refresh';
+      }
+    });
+  }
 }
 
 function renderChat() {
@@ -883,8 +944,9 @@ async function render() {
       app.innerHTML = renderPlan(horizon);
     } else if (r === '/analysis') {
       // Analysis = performance and recovery trend insights
-      const insights = await fetchLLMAnalysis();
-      app.innerHTML = renderAnalysis(insights);
+      const data = await fetchLLMAnalysis();
+      app.innerHTML = renderAnalysis(data);
+      attachAnalysisHandlers();
     } else if (r === '/chat') {
       // Chat = conversational interface
       app.innerHTML = renderChat();

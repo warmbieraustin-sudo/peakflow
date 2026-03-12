@@ -481,9 +481,43 @@ class AlphaHandler(BaseHTTPRequestHandler):
 
             if path == "/api/alpha/llm/analysis":
                 try:
-                    # Get recent workouts (last 14 days)
+                    from peakflow.analysis_cache import AnalysisCache
+                    
+                    q = parse_qs(parsed.query)
+                    athlete_id = (q.get('athleteId') or ['default'])[0]
+                    force_refresh = (q.get('refresh') or ['false'])[0].lower() in ('true', '1', 'yes')
+                    
+                    cache = AnalysisCache()
+                    
+                    # Check cache first (unless force_refresh)
+                    if not force_refresh:
+                        cached = cache.get(athlete_id)
+                        if cached and not cache.is_stale(athlete_id, max_age_hours=6.0):
+                            # Cache is fresh, return it
+                            return _json(self, HTTPStatus.OK, {
+                                "ok": True,
+                                "insights": cached["insights"],
+                                "period_days": cached.get("period_days", 14),
+                                "cached": True,
+                                "generated_at": cached.get("generated_at")
+                            })
+                    
+                    # Force refresh requested - check rate limit
+                    if force_refresh and not cache.should_refresh(athlete_id, min_refresh_hours=6.0):
+                        cached = cache.get(athlete_id)
+                        if cached:
+                            return _json(self, HTTPStatus.TOO_MANY_REQUESTS, {
+                                "ok": False,
+                                "error": "rate_limited",
+                                "message": "Analysis can only be refreshed every 6 hours",
+                                "insights": cached["insights"],
+                                "period_days": cached.get("period_days", 14),
+                                "cached": True,
+                                "generated_at": cached.get("generated_at")
+                            })
+                    
+                    # Generate new analysis
                     end_date = date.today()
-                    start_date_analysis = end_date - timedelta(days=14)
                     
                     # Collect recent workout reviews
                     recent_workouts = []
@@ -513,17 +547,22 @@ class AlphaHandler(BaseHTTPRequestHandler):
                                     'resting_hr': recovery.get('resting_hr')
                                 })
                     
-                    # Generate insights
+                    # Generate insights via LLM
                     llm = LLMClient()
                     insights = llm.generate_analysis_insights(
                         recent_workouts=recent_workouts,
                         recovery_trend=recovery_trend
                     )
                     
+                    # Cache the results
+                    cache.set(insights, athlete_id=athlete_id, period_days=14)
+                    
                     return _json(self, HTTPStatus.OK, {
                         "ok": True,
                         "insights": insights,
-                        "period_days": 14
+                        "period_days": 14,
+                        "cached": False,
+                        "generated_at": datetime.utcnow().isoformat() + "Z"
                     })
                     
                 except Exception as e:
