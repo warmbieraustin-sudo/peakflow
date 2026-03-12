@@ -173,6 +173,118 @@ function renderMorning(p) {
   `;
 }
 
+function getBlockColor(block) {
+  const target = block.target_type || '';
+  const low = block.target_low || 0;
+  
+  if (target.includes('power_pct_ftp')) {
+    if (low < 55) return '#4a9eff'; // recovery/easy blue
+    if (low < 75) return '#10b981'; // endurance green
+    if (low < 90) return '#f59e0b'; // tempo orange
+    if (low < 105) return '#ef4444'; // threshold red
+    return '#dc2626'; // VO2/anaerobic dark red
+  }
+  
+  if (target.includes('hr_pct_max')) {
+    if (low < 70) return '#4a9eff';
+    if (low < 80) return '#10b981';
+    if (low < 90) return '#f59e0b';
+    return '#ef4444';
+  }
+  
+  return '#6b7690'; // default muted
+}
+
+function formatDuration(seconds) {
+  if (!seconds) return '—';
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (secs === 0) return `${mins}min`;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+function renderWorkoutGraph(blocks) {
+  if (!blocks || blocks.length === 0) return '';
+  
+  const totalDuration = blocks.reduce((sum, b) => sum + (b.duration_sec || 0), 0);
+  if (totalDuration === 0) return '';
+  
+  const segments = blocks.map(b => {
+    const pct = ((b.duration_sec || 0) / totalDuration) * 100;
+    const color = getBlockColor(b);
+    const targetRange = b.target_low && b.target_high 
+      ? `${b.target_low}-${b.target_high}%`
+      : '—';
+    
+    return `
+      <div style="
+        flex: ${pct};
+        background: ${color};
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        color: rgba(255,255,255,0.9);
+        font-weight: 600;
+        border-right: 1px solid rgba(0,0,0,0.2);
+        position: relative;
+        overflow: hidden;
+      " title="${b.label}: ${formatDuration(b.duration_sec)} @ ${targetRange}">
+        ${pct > 8 ? formatDuration(b.duration_sec) : ''}
+      </div>
+    `;
+  }).join('');
+  
+  return `
+    <div style="
+      display: flex;
+      width: 100%;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    ">
+      ${segments}
+    </div>
+  `;
+}
+
+function renderWorkoutBlocks(blocks) {
+  if (!blocks || blocks.length === 0) return '';
+  
+  return blocks.map(b => {
+    const duration = formatDuration(b.duration_sec);
+    const target = b.target_low && b.target_high
+      ? `${b.target_low}-${b.target_high}%`
+      : '—';
+    const color = getBlockColor(b);
+    
+    return `
+      <div style="
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border, #1a1f2e);
+      ">
+        <div style="
+          width: 4px;
+          height: 28px;
+          background: ${color};
+          border-radius: 2px;
+        "></div>
+        <div style="flex: 1;">
+          <div style="font-weight: 600; font-size: 14px;">${b.label}</div>
+          <div class="muted" style="font-size: 12px;">
+            ${duration} • ${b.target_type.replace('_', ' ')} ${target}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
 function buildDailyDebrief(rec, review) {
   const sleep = rec?.sleep_score;
   const hrv = rec?.hrv;
@@ -353,9 +465,9 @@ function renderPlan(modalities, recommendation, horizon) {
     .map((m) => `<option value="${m}" ${m === recommendation.selected_sport ? 'selected' : ''}>${m}</option>`)
     .join('');
 
-  const blocks = (recommendation.plan?.blocks || [])
-    .map((b) => `<li>${b.label}: ${b.duration_sec}s • ${b.target_type} ${b.target_low ?? '—'}-${b.target_high ?? '—'}</li>`)
-    .join('');
+  const workoutBlocks = recommendation.plan?.blocks || [];
+  const workoutGraph = renderWorkoutGraph(workoutBlocks);
+  const workoutDetails = renderWorkoutBlocks(workoutBlocks);
 
   const weekRows = (horizon?.days || [])
     .slice(0, 7)
@@ -422,7 +534,7 @@ function renderPlan(modalities, recommendation, horizon) {
       <div class="label">Recommended Session</div>
       <div class="value" style="margin-bottom: 12px;">${recommendation.plan?.title || '—'}</div>
       ${advanced ? `<div class="muted" style="margin-bottom: 8px;">sport: ${recommendation.plan?.sport_type || '—'} • schema: ${recommendation.plan?.schema_version || '—'}</div>` : ''}
-      ${blocks ? `<ul style="margin: 0;">${blocks}</ul>` : '<div class="muted">No interval structure available</div>'}
+      ${workoutBlocks.length > 0 ? `${workoutGraph}<div style="margin-top: 8px;">${workoutDetails}</div>` : '<div class="muted">No interval structure available</div>'}
     </div>
     
     <div class="card">
