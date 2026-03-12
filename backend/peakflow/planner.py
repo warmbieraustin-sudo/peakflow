@@ -565,6 +565,43 @@ def build_horizon_plan(
     }
 
 
+def _coach_phase_from_signals(
+    summary: Dict[str, Any],
+    fresh: bool,
+    tp_days_with_plan: int,
+    fallback_phase: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Coach mode phase logic: avoid load-ratio-only deload when TP has active plan context.
+    Require stronger multi-signal fatigue evidence.
+    """
+    last7 = float(summary.get("last7_load") or 0.0)
+    prev_avg = float(summary.get("prev21_weekly_avg_load") or 0.0)
+    hard = int(summary.get("hard_sessions_last7") or 0)
+
+    if tp_days_with_plan >= 4:
+        # Coach has active weekly structure; only deload on stronger fatigue evidence.
+        # Require multi-signal evidence (not fresh + hard-session density),
+        # not just load ratio, to avoid false deload in coached build weeks.
+        strong_fatigue = (not fresh and hard >= 3) or (
+            not fresh and hard >= 2 and prev_avg > 0 and last7 > prev_avg * 1.5
+        )
+        if strong_fatigue:
+            return {
+                "phase": "deload",
+                "reason": "coach_mode_strong_fatigue_signals",
+                "polarization_target": {"easy": 0.9, "hard": 0.1},
+            }
+
+        return {
+            "phase": "coach_guided_build",
+            "reason": "tp_week_present_load_ratio_suppressed",
+            "polarization_target": {"easy": 0.8, "hard": 0.2},
+        }
+
+    return fallback_phase
+
+
 def build_coach_mode_horizon(
     shell_payload: Dict[str, Any] | None,
     selected_sport: str,
@@ -594,6 +631,23 @@ def build_coach_mode_horizon(
             replaced += 1
         else:
             d["plan_source"] = "peakflow_fallback"
+
+    # Phase override for coach mode to avoid false deload labels from load-ratio alone.
+    morning = ((shell_payload or {}).get("screens") or {}).get("morning_brief") or {}
+    fresh = bool((morning.get("headline") or {}).get("fresh", True))
+    summary = (base.get("periodization") or {}).get("recent_load_summary") or summarize_recent_load(recent_activities or [])
+    fallback_phase = {
+        "phase": (base.get("periodization") or {}).get("phase") or "build",
+        "reason": (base.get("periodization") or {}).get("reason") or "normal_progression",
+        "polarization_target": (base.get("periodization") or {}).get("polarization_target") or {"easy": 0.8, "hard": 0.2},
+    }
+    coach_phase = _coach_phase_from_signals(summary, fresh, replaced, fallback_phase)
+    base["periodization"] = {
+        "phase": coach_phase["phase"],
+        "reason": coach_phase["reason"],
+        "polarization_target": coach_phase["polarization_target"],
+        "recent_load_summary": summary,
+    }
 
     base.update(
         {

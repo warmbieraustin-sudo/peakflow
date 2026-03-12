@@ -147,13 +147,45 @@ class PlannerTests(unittest.TestCase):
                 "title": "Coach Day 1",
                 "workoutTypeValueId": 2,
                 "structure": {"structure": [{"steps": [{"name": "Active", "length": {"unit": "second", "value": 1200}, "targets": [{"minValue": 55, "maxValue": 65}]}]}]},
-            }
+            },
+            {
+                "workoutDay": "2026-03-13T00:00:00",
+                "workoutId": 223,
+                "title": "Coach Day 2",
+                "workoutTypeValueId": 2,
+                "structure": {"structure": [{"steps": [{"name": "Active", "length": {"unit": "second", "value": 1200}, "targets": [{"minValue": 60, "maxValue": 70}]}]}]},
+            },
+            {
+                "workoutDay": "2026-03-14T00:00:00",
+                "workoutId": 224,
+                "title": "Coach Day 3",
+                "workoutTypeValueId": 2,
+                "structure": {"structure": [{"steps": [{"name": "Active", "length": {"unit": "second", "value": 1200}, "targets": [{"minValue": 65, "maxValue": 75}]}]}]},
+            },
+            {
+                "workoutDay": "2026-03-15T00:00:00",
+                "workoutId": 225,
+                "title": "Coach Day 4",
+                "workoutTypeValueId": 2,
+                "structure": {"structure": [{"steps": [{"name": "Active", "length": {"unit": "second", "value": 1200}, "targets": [{"minValue": 50, "maxValue": 60}]}]}]},
+            },
         ]
 
-        horizon = build_coach_mode_horizon({}, "cycling", focus_sport="cycling", recent_activities=[], start_day="2026-03-12")
+        shell = {"screens": {"morning_brief": {"headline": {"fresh": True}}}}
+        recent = [
+            {"start_date_local": "2026-03-01T07:00:00", "icu_training_load": 90, "icu_intensity": 70},
+            {"start_date_local": "2026-03-02T07:00:00", "icu_training_load": 80, "icu_intensity": 65},
+            {"start_date_local": "2026-03-03T07:00:00", "icu_training_load": 75, "icu_intensity": 60},
+            {"start_date_local": "2026-03-04T07:00:00", "icu_training_load": 74, "icu_intensity": 68},
+            {"start_date_local": "2026-03-05T07:00:00", "icu_training_load": 70, "icu_intensity": 66},
+            {"start_date_local": "2026-03-06T07:00:00", "icu_training_load": 72, "icu_intensity": 64},
+            {"start_date_local": "2026-03-07T07:00:00", "icu_training_load": 73, "icu_intensity": 62},
+        ]
+        horizon = build_coach_mode_horizon(shell, "cycling", focus_sport="cycling", recent_activities=recent, start_day="2026-03-12")
         self.assertTrue(horizon["coach_mode"])
         self.assertIn("coach_horizon_summary", horizon)
         self.assertEqual(horizon["days"][0]["plan_source"], "trainingpeaks")
+        self.assertEqual(horizon["periodization"]["phase"], "coach_guided_build")
 
 
 if __name__ == "__main__":
