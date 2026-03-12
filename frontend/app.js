@@ -102,17 +102,25 @@ async function fetchPlannerState(athleteId) {
 }
 
 async function fetchPlanRecommendation(sport, focusSport, athleteFeedback, coachMode, athleteId) {
-  const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '', athleteId: athleteId || 'default' });
+  const qs = new URLSearchParams({
+    sport: sport || 'cycling',
+    focusSport: focusSport || '',
+    athleteId: athleteId || 'default',
+    coachMode: coachMode ? 'true' : 'false',
+  });
   if (athleteFeedback) qs.set('athleteFeedback', athleteFeedback);
-  if (coachMode) qs.set('coachMode', 'true');
   const r = await apiGet(`/api/alpha/planner/recommendation?${qs.toString()}`);
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.payload;
 }
 
-async function fetchPlanHorizon(sport, focusSport, athleteId) {
-  const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '', athleteId: athleteId || 'default' });
-  if (getCoachMode()) qs.set('coachMode', 'true');
+async function fetchPlanHorizon(sport, focusSport, athleteId, coachMode) {
+  const qs = new URLSearchParams({
+    sport: sport || 'cycling',
+    focusSport: focusSport || '',
+    athleteId: athleteId || 'default',
+    coachMode: coachMode ? 'true' : 'false',
+  });
   const r = await apiGet(`/api/alpha/planner/horizon?${qs.toString()}`);
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.payload;
@@ -415,10 +423,10 @@ async function render() {
       const athleteId = getAthleteId();
       const serverState = await fetchPlannerState(athleteId);
 
-      const selected = serverState.selected_sport || getSelectedSport();
-      const focus = serverState.focus_sport || getFocusSport();
-      const athleteFeedback = serverState.athlete_feedback || getAthleteFeedback();
-      const coachMode = (typeof serverState.coach_mode === 'boolean') ? serverState.coach_mode : getCoachMode();
+      const selected = localStorage.getItem(SPORT_KEY) ? getSelectedSport() : (serverState.selected_sport || getSelectedSport());
+      const focus = localStorage.getItem(FOCUS_SPORT_KEY) ? getFocusSport() : (serverState.focus_sport || getFocusSport());
+      const athleteFeedback = localStorage.getItem(ATHLETE_FEEDBACK_KEY) ? getAthleteFeedback() : (serverState.athlete_feedback || getAthleteFeedback());
+      const coachMode = localStorage.getItem(COACH_MODE_KEY) ? getCoachMode() : ((typeof serverState.coach_mode === 'boolean') ? serverState.coach_mode : getCoachMode());
 
       // keep local cache aligned for UI continuity
       setSelectedSport(selected);
@@ -429,7 +437,7 @@ async function render() {
       const [modalities, recommendation, horizon] = await Promise.all([
         fetchModalities(),
         fetchPlanRecommendation(selected, focus, athleteFeedback, coachMode, athleteId),
-        fetchPlanHorizon(selected, focus, athleteId),
+        fetchPlanHorizon(selected, focus, athleteId, coachMode),
       ]);
       app.innerHTML = renderPlan(modalities, recommendation, horizon);
       attachPlanHandlers();
