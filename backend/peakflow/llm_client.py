@@ -15,6 +15,31 @@ class DailyDebrief(BaseModel):
     debrief: str = Field(description="Main narrative debrief (2-3 sentences)")
     today_focus: str = Field(description="Today's training focus (1 sentence)")
 
+class WorkoutBlock(BaseModel):
+    """Single workout interval/block"""
+    label: str = Field(description="Block name (e.g., 'Warm up', 'Active', 'Cool Down')")
+    duration_minutes: int = Field(description="Duration in minutes")
+    target_low: Optional[int] = Field(None, description="Lower target (% or watts)")
+    target_high: Optional[int] = Field(None, description="Upper target (% or watts)")
+    target_type: str = Field("effort", description="power_pct_ftp, hr_pct_max, effort")
+    description: str = Field(description="Human-readable block description")
+
+class DailyWorkout(BaseModel):
+    """Single day's workout plan"""
+    sport_type: str = Field(description="cycling, running, hiking, yoga, strength, ski")
+    title: str = Field(description="Workout title")
+    duration_minutes: int = Field(description="Total duration")
+    intensity: str = Field(description="easy, moderate, hard")
+    blocks: list[WorkoutBlock] = Field(description="Workout structure")
+    coach_notes: Optional[str] = Field(None, description="Coach commentary")
+
+class WeeklyPlan(BaseModel):
+    """7-day workout plan"""
+    plan_type: str = Field(description="mixed_modality or single_sport")
+    primary_sport: Optional[str] = Field(None, description="Primary sport if single_sport")
+    workouts: dict[str, DailyWorkout] = Field(description="ISO date -> workout mapping")
+    weekly_notes: str = Field(description="Week-level coaching notes")
+
 class LLMClient:
     """
     LLM client for PeakFlow alpha.
@@ -203,6 +228,298 @@ class LLMClient:
         except Exception as e:
             print(f"LLM workout explanation failed: {e}")
             return f"This {intensity} intensity session is appropriate given your current recovery and training load."
+    
+    def generate_weekly_plan(
+        self,
+        start_date: str,
+        athlete_preferences: Dict[str, Any],
+        recovery: Dict[str, Any],
+        load: Optional[Dict[str, Any]] = None,
+        recent_workouts: Optional[list[Dict[str, Any]]] = None
+    ) -> WeeklyPlan:
+        """
+        Generate 7-day workout plan using LLM.
+        
+        Args:
+            start_date: ISO date for week start (e.g., "2026-03-12")
+            athlete_preferences: Sport mix, weekly hours, goals
+            recovery: Current recovery state
+            load: Training load (CTL/ATL/TSB)
+            recent_workouts: Recent workout history for context
+        
+        Returns:
+            WeeklyPlan with daily workouts
+        """
+        
+        prompt = self._build_weekly_plan_prompt(
+            start_date, athlete_preferences, recovery, load, recent_workouts
+        )
+        
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=2000,
+                temperature=0.7,
+                system="You are a professional endurance coach building adaptive weekly training plans. Generate detailed, sport-specific workouts with proper progression and recovery. Return ONLY valid JSON.",
+                messages=[{
+                    "role": "user",
+                    "content": prompt
+                }]
+            )
+            
+            content = response.content[0].text
+            
+            # Extract JSON
+            if "```json" in content:
+                json_str = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                json_str = content.split("```")[1].split("```")[0].strip()
+            else:
+                json_str = content.strip()
+            
+            data = json.loads(json_str)
+            return WeeklyPlan(**data)
+            
+        except Exception as e:
+            print(f"LLM weekly plan failed: {e}, using fallback")
+            return self._fallback_weekly_plan(start_date, athlete_preferences)
+    
+    def _build_weekly_plan_prompt(
+        self,
+        start_date: str,
+        athlete_preferences: Dict[str, Any],
+        recovery: Dict[str, Any],
+        load: Optional[Dict[str, Any]],
+        recent_workouts: Optional[list[Dict[str, Any]]]
+    ) -> str:
+        """Build prompt for weekly plan generation."""
+        
+        prompt_parts = ["Generate a 7-day training plan based on:\n"]
+        
+        # Athlete preferences
+        prompt_parts.append("**Athlete Profile:**")
+        weekly_hours = athlete_preferences.get('weekly_hours', 10)
+        primary_sport = athlete_preferences.get('primary_sport', 'cycling')
+        sports = athlete_preferences.get('sports', [primary_sport])
+        goal = athlete_preferences.get('goal', 'Build endurance and consistency')
+        
+        prompt_parts.append(f"- Weekly training time: {weekly_hours} hours")
+        prompt_parts.append(f"- Sports: {', '.join(sports)}")
+        prompt_parts.append(f"- Goal: {goal}")
+        
+        # Current state
+        prompt_parts.append("\n**Current State:**")
+        if 'sleep_score' in recovery:
+            prompt_parts.append(f"- Recovery: Sleep {recovery['sleep_score']}/100")
+        if load and 'ctl' in load:
+            prompt_parts.append(f"- Fitness (CTL): {load['ctl']:.1f}")
+        
+        # Recent context
+        if recent_workouts:
+            prompt_parts.append(f"\n**Recent workouts:** {len(recent_workouts)} sessions in past week")
+        
+        prompt_parts.append(f"\n**Week start date:** {start_date}")
+        
+        # Schema
+        prompt_parts.append("\nReturn ONLY valid JSON matching this schema:")
+        prompt_parts.append('''{
+  "plan_type": "mixed_modality" or "single_sport",
+  "primary_sport": "<sport>" or null,
+  "workouts": {
+    "2026-03-12": {
+      "sport_type": "cycling",
+      "title": "Recovery Ride",
+      "duration_minutes": 60,
+      "intensity": "easy",
+      "blocks": [
+        {
+          "label": "Warm up",
+          "duration_minutes": 5,
+          "target_low": 45,
+          "target_high": 55,
+          "target_type": "power_pct_ftp",
+          "description": "5min easy spin"
+        },
+        {
+          "label": "Active",
+          "duration_minutes": 50,
+          "target_low": 40,
+          "target_high": 50,
+          "target_type": "power_pct_ftp",
+          "description": "50min @ Z1-Z2"
+        },
+        {
+          "label": "Cool Down",
+          "duration_minutes": 5,
+          "target_low": 45,
+          "target_high": null,
+          "target_type": "power_pct_ftp",
+          "description": "5min easy spin"
+        }
+      ],
+      "coach_notes": "Easy day to promote recovery"
+    },
+    ... (6 more days)
+  },
+  "weekly_notes": "<week-level coaching summary>"
+}''')
+        
+        prompt_parts.append("\nGuidelines:")
+        prompt_parts.append("- Mix intensities (80/20 polarized: 80% easy, 20% hard)")
+        prompt_parts.append("- Include at least 1 rest/active recovery day")
+        prompt_parts.append("- Match sport-specific target types (power for cycling, pace for running, effort for yoga/hiking)")
+        prompt_parts.append("- Total weekly volume should match athlete's available hours")
+        
+        return "\n".join(prompt_parts)
+    
+    def _fallback_weekly_plan(
+        self,
+        start_date: str,
+        athlete_preferences: Dict[str, Any]
+    ) -> WeeklyPlan:
+        """Deterministic fallback weekly plan when LLM fails."""
+        
+        from datetime import datetime, timedelta
+        
+        start = datetime.fromisoformat(start_date)
+        primary_sport = athlete_preferences.get('primary_sport', 'cycling')
+        
+        # Simple 7-day pattern: easy, moderate, easy, hard, easy, moderate, rest
+        pattern = ['easy', 'moderate', 'easy', 'hard', 'easy', 'moderate', 'rest']
+        
+        workouts = {}
+        for i in range(7):
+            day = (start + timedelta(days=i)).isoformat()
+            intensity = pattern[i]
+            
+            if intensity == 'rest':
+                workouts[day] = DailyWorkout(
+                    sport_type=primary_sport,
+                    title="Rest Day",
+                    duration_minutes=0,
+                    intensity="easy",
+                    blocks=[],
+                    coach_notes="Recovery day"
+                )
+            else:
+                duration = 90 if intensity == 'hard' else 60
+                workouts[day] = DailyWorkout(
+                    sport_type=primary_sport,
+                    title=f"{intensity.capitalize()} {primary_sport}",
+                    duration_minutes=duration,
+                    intensity=intensity,
+                    blocks=[
+                        WorkoutBlock(
+                            label="Main",
+                            duration_minutes=duration,
+                            target_low=40 if intensity == 'easy' else 70,
+                            target_high=60 if intensity == 'easy' else 85,
+                            target_type="power_pct_ftp" if primary_sport == 'cycling' else "effort",
+                            description=f"{duration}min {intensity} effort"
+                        )
+                    ],
+                    coach_notes=f"{intensity.capitalize()} training session"
+                )
+        
+        return WeeklyPlan(
+            plan_type="single_sport",
+            primary_sport=primary_sport,
+            workouts=workouts,
+            weekly_notes="Polarized training plan with mixed intensities"
+        )
+    
+    def generate_analysis_insights(
+        self,
+        recent_workouts: list[Dict[str, Any]],
+        recovery_trend: list[Dict[str, Any]],
+        load_trend: Optional[list[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Generate performance and recovery trend analysis.
+        
+        Args:
+            recent_workouts: Recent workout history (last 7-30 days)
+            recovery_trend: Recovery metrics over time
+            load_trend: Training load progression (optional)
+        
+        Returns:
+            Dict with insights, trends, and recommendations
+        """
+        
+        prompt_parts = ["Analyze this athlete's recent training and recovery:\n"]
+        
+        # Workout summary
+        if recent_workouts:
+            prompt_parts.append(f"**Recent workouts:** {len(recent_workouts)} sessions")
+            intensities = [w.get('intensity', 'unknown') for w in recent_workouts]
+            easy_count = intensities.count('easy')
+            hard_count = intensities.count('hard') + intensities.count('moderate')
+            prompt_parts.append(f"- Easy: {easy_count}, Hard: {hard_count}")
+        
+        # Recovery trend
+        if recovery_trend:
+            avg_sleep = sum(r.get('sleep_score', 0) for r in recovery_trend) / len(recovery_trend)
+            avg_hrv = sum(r.get('hrv', 0) for r in recovery_trend) / len(recovery_trend)
+            prompt_parts.append(f"\n**Recovery trend (last {len(recovery_trend)} days):**")
+            prompt_parts.append(f"- Avg sleep score: {avg_sleep:.0f}/100")
+            prompt_parts.append(f"- Avg HRV: {avg_hrv:.0f}ms")
+        
+        # Load trend
+        if load_trend:
+            prompt_parts.append(f"\n**Load progression:** {len(load_trend)} days")
+            latest = load_trend[-1]
+            if 'ctl' in latest:
+                prompt_parts.append(f"- Current CTL: {latest['ctl']:.1f}")
+        
+        prompt_parts.append("\nGenerate insights as JSON:")
+        prompt_parts.append('''{
+  "performance_insights": [
+    "<insight 1>",
+    "<insight 2>"
+  ],
+  "recovery_insights": [
+    "<insight 1>",
+    "<insight 2>"
+  ],
+  "recommendations": [
+    "<actionable recommendation 1>",
+    "<actionable recommendation 2>"
+  ],
+  "summary": "<1-2 sentence overview>"
+}''')
+        
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=600,
+                temperature=0.7,
+                system="You are a data-driven endurance coach analyzing training trends. Provide actionable insights based on patterns in the athlete's data.",
+                messages=[{
+                    "role": "user",
+                    "content": "\n".join(prompt_parts)
+                }]
+            )
+            
+            content = response.content[0].text
+            
+            # Extract JSON
+            if "```json" in content:
+                json_str = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                json_str = content.split("```")[1].split("```")[0].strip()
+            else:
+                json_str = content.strip()
+            
+            return json.loads(json_str)
+            
+        except Exception as e:
+            print(f"LLM analysis insights failed: {e}")
+            return {
+                "performance_insights": ["Workout data available"],
+                "recovery_insights": ["Recovery data available"],
+                "recommendations": ["Continue with planned training"],
+                "summary": "Keep training consistently"
+            }
     
     def _fallback_debrief(
         self,

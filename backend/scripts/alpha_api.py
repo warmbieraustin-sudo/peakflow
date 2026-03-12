@@ -207,6 +207,8 @@ class AlphaHandler(BaseHTTPRequestHandler):
                             "/api/alpha/planner/horizon?sport=cycling&focusSport=cycling",
                             "/api/alpha/llm/debrief/today",
                             "/api/alpha/llm/explain-workout?sport=cycling&athleteId=default",
+                            "/api/alpha/llm/weekly-plan?startDate=2026-03-12&athleteId=default",
+                            "/api/alpha/llm/analysis",
                         ],
                     },
                 )
@@ -431,6 +433,104 @@ class AlphaHandler(BaseHTTPRequestHandler):
                     return _json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {
                         "ok": False,
                         "error": "llm_generation_failed",
+                        "detail": str(e)
+                    })
+
+            if path == "/api/alpha/llm/weekly-plan":
+                try:
+                    q = parse_qs(parsed.query)
+                    start_date_q = (q.get('startDate') or [None])[0]
+                    athlete_id = (q.get('athleteId') or ['default'])[0]
+                    
+                    # Get start date (default to today)
+                    start_date = start_date_q or date.today().isoformat()
+                    
+                    # Get athlete preferences (stubbed for alpha - will come from preferences system)
+                    athlete_preferences = {
+                        'weekly_hours': 10,
+                        'primary_sport': 'cycling',
+                        'sports': ['cycling', 'running', 'yoga'],
+                        'goal': 'Build endurance and prepare for summer crits'
+                    }
+                    
+                    # Get current recovery and load
+                    shell = build_alpha_shell_payload(SILVER_DIR, day=None)
+                    recovery_raw = shell.get("screens", {}).get("recovery_load", {}).get("recovery", {}) if shell else {}
+                    load_raw = shell.get("screens", {}).get("recovery_load", {}).get("load", {}) if shell else {}
+                    
+                    # Generate weekly plan
+                    llm = LLMClient()
+                    weekly_plan = llm.generate_weekly_plan(
+                        start_date=start_date,
+                        athlete_preferences=athlete_preferences,
+                        recovery=recovery_raw,
+                        load=load_raw
+                    )
+                    
+                    return _json(self, HTTPStatus.OK, {
+                        "ok": True,
+                        "plan": weekly_plan.model_dump()
+                    })
+                    
+                except Exception as e:
+                    return _json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "ok": False,
+                        "error": "llm_plan_failed",
+                        "detail": str(e)
+                    })
+
+            if path == "/api/alpha/llm/analysis":
+                try:
+                    # Get recent workouts (last 14 days)
+                    from datetime import timedelta
+                    end_date = date.today()
+                    start_date_analysis = end_date - timedelta(days=14)
+                    
+                    # Collect recent workout reviews
+                    recent_workouts = []
+                    for i in range(14):
+                        day = (end_date - timedelta(days=i)).isoformat()
+                        review = build_latest_workout_review(day=day)
+                        if review and review.get('execution', {}).get('status') == 'ok':
+                            recent_workouts.append({
+                                'date': day,
+                                'sport': review.get('execution', {}).get('activity', {}).get('sport_type'),
+                                'intensity': review.get('execution', {}).get('activity', {}).get('intensity'),
+                                'duration': review.get('execution', {}).get('activity', {}).get('moving_time_sec')
+                            })
+                    
+                    # Collect recovery trend
+                    recovery_trend = []
+                    for i in range(14):
+                        day = (end_date - timedelta(days=i)).isoformat()
+                        shell = build_alpha_shell_payload(SILVER_DIR, day=day)
+                        if shell:
+                            recovery = shell.get("screens", {}).get("recovery_load", {}).get("recovery", {})
+                            if recovery:
+                                recovery_trend.append({
+                                    'date': day,
+                                    'sleep_score': recovery.get('sleep_score'),
+                                    'hrv': recovery.get('hrv'),
+                                    'resting_hr': recovery.get('resting_hr')
+                                })
+                    
+                    # Generate insights
+                    llm = LLMClient()
+                    insights = llm.generate_analysis_insights(
+                        recent_workouts=recent_workouts,
+                        recovery_trend=recovery_trend
+                    )
+                    
+                    return _json(self, HTTPStatus.OK, {
+                        "ok": True,
+                        "insights": insights,
+                        "period_days": 14
+                    })
+                    
+                except Exception as e:
+                    return _json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "ok": False,
+                        "error": "llm_analysis_failed",
                         "detail": str(e)
                     })
 
