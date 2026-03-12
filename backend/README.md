@@ -93,3 +93,9 @@ PYTHONPATH=. python3 scripts/query_range.py --oldest 2026-03-10 --newest 2026-03
 cd backend
 PYTHONPATH=. python3 -m unittest tests/test_query.py -v
 ```
+
+## End-to-end smoke check
+```bash
+cd backend
+PYTHONPATH=. python3 scripts/smoke_e2e.py
+```
