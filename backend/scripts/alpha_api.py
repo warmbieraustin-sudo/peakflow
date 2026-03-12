@@ -13,7 +13,13 @@ from urllib.parse import parse_qs, urlparse
 from peakflow.pwa_contract import build_alpha_shell_payload
 from peakflow.workout_review import build_latest_workout_review
 from peakflow.intervals import IntervalsClient
-from peakflow.planner import SUPPORTED_SPORTS, build_coach_mode_recommendation, build_daily_recommendation, build_horizon_plan
+from peakflow.planner import (
+    SUPPORTED_SPORTS,
+    build_coach_mode_horizon,
+    build_coach_mode_recommendation,
+    build_daily_recommendation,
+    build_horizon_plan,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT.parent / "frontend"
@@ -21,6 +27,35 @@ SILVER_DIR = ROOT / "data" / "silver"
 ALPHA_TOKEN = os.environ.get("PEAKFLOW_ALPHA_TOKEN", "").strip()
 
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+PLANNER_STATE_PATH = ROOT / "data" / "app-state" / "planner_state.json"
+
+
+def _load_planner_state() -> dict:
+    if not PLANNER_STATE_PATH.exists():
+        return {"athletes": {}}
+    try:
+        return json.loads(PLANNER_STATE_PATH.read_text())
+    except Exception:
+        return {"athletes": {}}
+
+
+def _save_planner_state(state: dict) -> None:
+    PLANNER_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PLANNER_STATE_PATH.write_text(json.dumps(state, indent=2))
+
+
+def _get_athlete_state(athlete_id: str) -> dict:
+    state = _load_planner_state()
+    return (state.get("athletes") or {}).get(athlete_id, {})
+
+
+def _upsert_athlete_state(athlete_id: str, updates: dict) -> dict:
+    state = _load_planner_state()
+    athletes = state.setdefault("athletes", {})
+    row = athletes.setdefault(athlete_id, {})
+    row.update({k: v for k, v in updates.items() if v is not None})
+    _save_planner_state(state)
+    return row
 
 
 def _json(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
@@ -115,6 +150,7 @@ class AlphaHandler(BaseHTTPRequestHandler):
                             "/api/alpha/shell/YYYY-MM-DD",
                             "/api/alpha/workout/latest",
                             "/api/alpha/planner/modalities",
+                            "/api/alpha/planner/state?athleteId=default",
                             "/api/alpha/planner/recommendation?sport=cycling",
                             "/api/alpha/planner/recommendation?sport=cycling&coachMode=true",
                             "/api/alpha/planner/horizon?sport=cycling&focusSport=cycling",
@@ -146,16 +182,43 @@ class AlphaHandler(BaseHTTPRequestHandler):
             if path == "/api/alpha/planner/modalities":
                 return _json(self, HTTPStatus.OK, {"ok": True, "modalities": SUPPORTED_SPORTS})
 
+            if path == "/api/alpha/planner/state":
+                q = parse_qs(parsed.query)
+                athlete_id = (q.get("athleteId") or ["default"])[0]
+                return _json(self, HTTPStatus.OK, {"ok": True, "athlete_id": athlete_id, "state": _get_athlete_state(athlete_id)})
+
             if path == "/api/alpha/planner/recommendation":
                 q = parse_qs(parsed.query)
                 day = (q.get("day") or [None])[0]
-                sport = (q.get("sport") or ["cycling"])[0]
-                focus_sport = (q.get("focusSport") or [None])[0]
+                athlete_id = (q.get("athleteId") or ["default"])[0]
+                sport_q = (q.get("sport") or [None])[0]
+                focus_q = (q.get("focusSport") or [None])[0]
                 feedback_day = (q.get("feedbackDay") or [None])[0]
-                athlete_feedback = (q.get("athleteFeedback") or [None])[0]
-                coach_mode = ((q.get("coachMode") or ["false"])[0]).strip().lower() in ("1", "true", "yes", "on")
+                athlete_feedback_q = (q.get("athleteFeedback") or [None])[0]
+                coach_mode_q = (q.get("coachMode") or [None])[0]
+
+                saved = _get_athlete_state(athlete_id)
+                sport = sport_q or saved.get("selected_sport") or "cycling"
+                focus_sport = focus_q or saved.get("focus_sport")
+                athlete_feedback = athlete_feedback_q or saved.get("athlete_feedback")
+                coach_mode = (
+                    ((coach_mode_q or "").strip().lower() in ("1", "true", "yes", "on"))
+                    if coach_mode_q is not None
+                    else bool(saved.get("coach_mode", False))
+                )
+
                 if not feedback_day:
                     feedback_day = (date.today() - timedelta(days=1)).isoformat()
+
+                _upsert_athlete_state(
+                    athlete_id,
+                    {
+                        "selected_sport": sport,
+                        "focus_sport": focus_sport,
+                        "athlete_feedback": athlete_feedback,
+                        "coach_mode": coach_mode,
+                    },
+                )
 
                 shell = build_alpha_shell_payload(SILVER_DIR, day=day)
                 review = build_latest_workout_review(day=feedback_day)
@@ -176,13 +239,22 @@ class AlphaHandler(BaseHTTPRequestHandler):
                         last_review=review,
                         athlete_feedback=athlete_feedback,
                     )
+                payload["athlete_id"] = athlete_id
                 return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
 
             if path == "/api/alpha/planner/horizon":
                 q = parse_qs(parsed.query)
                 day = (q.get("day") or [None])[0]
-                sport = (q.get("sport") or ["cycling"])[0]
-                focus_sport = (q.get("focusSport") or [None])[0]
+                athlete_id = (q.get("athleteId") or ["default"])[0]
+                saved = _get_athlete_state(athlete_id)
+                sport = (q.get("sport") or [saved.get("selected_sport") or "cycling"])[0]
+                focus_sport = (q.get("focusSport") or [saved.get("focus_sport")])[0]
+                coach_mode_q = (q.get("coachMode") or [None])[0]
+                coach_mode = (
+                    ((coach_mode_q or "").strip().lower() in ("1", "true", "yes", "on"))
+                    if coach_mode_q is not None
+                    else bool(saved.get("coach_mode", False))
+                )
 
                 shell = build_alpha_shell_payload(SILVER_DIR, day=day)
                 icu = IntervalsClient.from_env()
@@ -190,7 +262,11 @@ class AlphaHandler(BaseHTTPRequestHandler):
                 oldest = (date.today() - timedelta(days=35)).isoformat()
                 recent_activities = icu.activities(oldest, newest)
 
-                payload = build_horizon_plan(shell, sport, focus_sport=focus_sport, recent_activities=recent_activities)
+                if coach_mode:
+                    payload = build_coach_mode_horizon(shell, sport, focus_sport=focus_sport, recent_activities=recent_activities, start_day=day)
+                else:
+                    payload = build_horizon_plan(shell, sport, focus_sport=focus_sport, recent_activities=recent_activities)
+                payload["athlete_id"] = athlete_id
                 return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
 
             return _json(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "not_found"})

@@ -35,6 +35,7 @@ const SPORT_KEY = 'peakflow_selected_sport';
 const FOCUS_SPORT_KEY = 'peakflow_focus_sport';
 const ATHLETE_FEEDBACK_KEY = 'peakflow_athlete_feedback';
 const COACH_MODE_KEY = 'peakflow_coach_mode';
+const ATHLETE_ID = 'default';
 
 function getSelectedSport() {
   return localStorage.getItem(SPORT_KEY) || 'cycling';
@@ -76,7 +77,7 @@ async function fetchModalities() {
 }
 
 async function fetchPlanRecommendation(sport, focusSport, athleteFeedback, coachMode) {
-  const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '' });
+  const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '', athleteId: ATHLETE_ID });
   if (athleteFeedback) qs.set('athleteFeedback', athleteFeedback);
   if (coachMode) qs.set('coachMode', 'true');
   const r = await apiGet(`/api/alpha/planner/recommendation?${qs.toString()}`);
@@ -85,7 +86,8 @@ async function fetchPlanRecommendation(sport, focusSport, athleteFeedback, coach
 }
 
 async function fetchPlanHorizon(sport, focusSport) {
-  const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '' });
+  const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '', athleteId: ATHLETE_ID });
+  if (getCoachMode()) qs.set('coachMode', 'true');
   const r = await apiGet(`/api/alpha/planner/horizon?${qs.toString()}`);
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.payload;
@@ -243,6 +245,7 @@ function renderPlan(modalities, recommendation, horizon) {
     <div class="card">
       <div class="label">7-Day Firm Horizon</div>
       <div class="muted">Phase: ${horizon?.periodization?.phase || '—'} • ${horizon?.periodization?.reason || '—'}</div>
+      <div class="muted">Coach Mode: ${horizon?.coach_mode ? 'ON' : 'OFF'}${horizon?.coach_horizon_summary ? ` • TP days: ${horizon.coach_horizon_summary.tp_days_with_plan}/${horizon.coach_horizon_summary.total_days}` : ''}</div>
       <ul>${weekRows}</ul>
     </div>
   `;

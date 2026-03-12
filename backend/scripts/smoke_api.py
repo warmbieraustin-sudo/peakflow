@@ -63,6 +63,9 @@ def main() -> int:
         status, body = get_json(base + "/api/alpha/planner/modalities", token=args.token or None)
         checks.append(("planner_modalities", status == 200 and body.get("ok") is True and isinstance(body.get("modalities"), list), status, body))
 
+        status, body = get_json(base + "/api/alpha/planner/state?athleteId=default", token=args.token or None)
+        checks.append(("planner_state", status == 200 and body.get("ok") is True and body.get("athlete_id") == "default", status, body))
+
         status, body = get_json(base + "/api/alpha/planner/recommendation?sport=running", token=args.token or None)
         checks.append(("planner_reco", status == 200 and body.get("ok") is True and (body.get("payload") or {}).get("selected_sport") == "running", status, body))
 

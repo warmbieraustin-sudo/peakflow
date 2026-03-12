@@ -106,9 +106,9 @@ def _templates_for_sport(sport: str, intensity: str) -> Dict[str, Any]:
     }
 
 
-def _tp_workouts_via_script(day: str) -> List[Dict[str, Any]]:
+def _tp_workouts_range_via_script(oldest: str, newest: str) -> List[Dict[str, Any]]:
     tp_script = Path.home() / ".openclaw" / "workspace" / "skills" / "trainingpeaks" / "scripts" / "tp.py"
-    cmd = ["/opt/homebrew/bin/python3", str(tp_script), "workouts", day, day, "--json"]
+    cmd = ["/opt/homebrew/bin/python3", str(tp_script), "workouts", oldest, newest, "--json"]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     if r.returncode != 0:
         raise RuntimeError(f"tp.py failed: {r.stderr.strip()}")
@@ -118,6 +118,10 @@ def _tp_workouts_via_script(day: str) -> List[Dict[str, Any]]:
     if isinstance(out, dict):
         return out.get("workouts", [])
     return []
+
+
+def _tp_workouts_via_script(day: str) -> List[Dict[str, Any]]:
+    return _tp_workouts_range_via_script(day, day)
 
 
 def _tp_workout_to_plan(workout: Dict[str, Any], fallback_sport: str) -> Dict[str, Any]:
@@ -166,6 +170,23 @@ def _tp_workout_to_plan(workout: Dict[str, Any], fallback_sport: str) -> Dict[st
     }
 
 
+def _tp_day_key(workout: Dict[str, Any]) -> str | None:
+    d = workout.get("workoutDay")
+    if not d or not isinstance(d, str):
+        return None
+    return d[:10]
+
+
+def _group_tp_by_day(workouts: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for w in workouts or []:
+        key = _tp_day_key(w)
+        if not key:
+            continue
+        out.setdefault(key, []).append(w)
+    return out
+
+
 def build_coach_mode_recommendation(
     shell_payload: Dict[str, Any] | None,
     selected_sport: str,
@@ -195,6 +216,20 @@ def build_coach_mode_recommendation(
     prescribed = tp_plan or overlay.get("plan")
     valid, reject_reasons = validate_plan_schema(prescribed)
 
+    coach_explanation = {
+        "summary": "TP remains source-of-truth. PeakFlow overlay is advisory only.",
+        "inputs": {
+            "review_score": ((last_review or {}).get("analysis") or {}).get("score"),
+            "review_confidence": ((last_review or {}).get("analysis") or {}).get("confidence"),
+            "athlete_feedback": athlete_feedback,
+        },
+        "recommended_overlay": {
+            "next_action": overlay.get("next_action"),
+            "modification_reason": overlay.get("modification_reason"),
+            "intensity_band": overlay.get("intensity_band"),
+        },
+    }
+
     return {
         **overlay,
         "coach_mode": True,
@@ -206,6 +241,7 @@ def build_coach_mode_recommendation(
             "next_action": overlay.get("next_action"),
             "modification_reason": overlay.get("modification_reason"),
         },
+        "coach_explanation": coach_explanation,
         "plan": prescribed,
         "plan_validation": {
             "valid": valid,
@@ -527,3 +563,47 @@ def build_horizon_plan(
         },
         "days": days,
     }
+
+
+def build_coach_mode_horizon(
+    shell_payload: Dict[str, Any] | None,
+    selected_sport: str,
+    focus_sport: str | None = None,
+    recent_activities: List[Dict[str, Any]] | None = None,
+    start_day: str | None = None,
+) -> Dict[str, Any]:
+    base = build_horizon_plan(shell_payload, selected_sport, focus_sport=focus_sport, recent_activities=recent_activities)
+
+    start = date.fromisoformat(start_day) if start_day else date.today()
+    end = start + timedelta(days=27)
+
+    tp_error = None
+    tp_days: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        tp_days = _group_tp_by_day(_tp_workouts_range_via_script(start.isoformat(), end.isoformat()))
+    except Exception as exc:
+        tp_error = str(exc)
+
+    replaced = 0
+    for d in base.get("days", []):
+        day = d.get("date")
+        workouts = tp_days.get(day) or []
+        if workouts:
+            d["plan"] = _tp_workout_to_plan(workouts[0], d.get("sport_type") or selected_sport)
+            d["plan_source"] = "trainingpeaks"
+            replaced += 1
+        else:
+            d["plan_source"] = "peakflow_fallback"
+
+    base.update(
+        {
+            "coach_mode": True,
+            "non_destructive_overlay": True,
+            "coach_horizon_summary": {
+                "tp_days_with_plan": replaced,
+                "total_days": len(base.get("days", [])),
+                "tp_error": tp_error,
+            },
+        }
+    )
+    return base
