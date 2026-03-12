@@ -634,7 +634,7 @@ class LLMClient:
         prompt_parts = ["Analyze today's workout execution vs plan:\n"]
         
         # Prescription
-        if prescription.get("status") == "available":
+        if prescription.get("status") in ("available", "ok"): 
             source = prescription.get("source", "unknown")
             title = prescription.get("workout_title", "Workout")
             prompt_parts.append(f"**Planned workout ({source}):**")
@@ -654,7 +654,7 @@ class LLMClient:
         activity = execution.get("activity", {})
         if activity:
             sport = activity.get("sport_type", "workout")
-            duration_min = activity.get("moving_time", 0) / 60
+            duration_min = (activity.get("moving_time_sec") or activity.get("moving_time") or 0) / 60
             intensity = activity.get("intensity", "unknown")
             
             prompt_parts.append(f"\n**Actual execution:**")
@@ -664,8 +664,8 @@ class LLMClient:
             
             # Power metrics (if cycling)
             if sport in ("cycling", "virtualride"):
-                np = activity.get("np")
-                avg_watts = activity.get("average_watts")
+                np = activity.get("np") or activity.get("weighted_avg_watts")
+                avg_watts = activity.get("avg_watts") or activity.get("average_watts")
                 if np:
                     prompt_parts.append(f"- Normalized Power: {np:.0f}w")
                 elif avg_watts:
@@ -676,14 +676,17 @@ class LLMClient:
                     prompt_parts.append(f"- Variability Index: {vi:.2f}")
             
             # HR metrics
-            avg_hr = activity.get("average_hr")
+            avg_hr = activity.get("avg_hr") or activity.get("average_hr")
             if avg_hr:
                 prompt_parts.append(f"- Average HR: {avg_hr:.0f}bpm")
         
         # Interval matching (if available)
-        match_tier = workout_review.get("match_tier")
+        analysis_src = workout_review.get("analysis", {})
+        match_tier = analysis_src.get("matching_tier")
         if match_tier:
-            prompt_parts.append(f"\n**Adherence:** {match_tier}")
+            prompt_parts.append(f"\n**Adherence tier:** {match_tier}")
+        if analysis_src.get("score") is not None:
+            prompt_parts.append(f"- Compliance score: {analysis_src.get('score')}")
         
         prompt_parts.append("\nGenerate analysis as JSON:")
         prompt_parts.append('''{
@@ -727,13 +730,49 @@ class LLMClient:
             
         except Exception as e:
             print(f"LLM workout analysis failed: {e}")
+
+            # Deterministic fallback from workout_review contract (no LLM required)
+            src = workout_review.get("analysis", {})
+            score = src.get("score")
+            interval_matching = (src.get("interval_matching") or "unknown").lower()
+
+            adherence = "unknown"
+            quality = "unknown"
+            insights = ["Workout completed"]
+            recs = ["Review execution details"]
+
+            if isinstance(score, (int, float)):
+                if score >= 90:
+                    adherence = "excellent"
+                    quality = "excellent"
+                    insights = [f"Excellent execution vs plan ({score:.0f}% compliance)."]
+                    recs = ["Keep progression steady for your next key workout."]
+                elif score >= 75:
+                    adherence = "good"
+                    quality = "good"
+                    insights = [f"Good execution ({score:.0f}% compliance) with minor drift."]
+                    recs = ["Hold current load and tighten pacing in work intervals."]
+                elif score >= 55:
+                    adherence = "partial"
+                    quality = "average"
+                    insights = [f"Partial adherence ({score:.0f}% compliance)."]
+                    recs = ["Slightly reduce intensity next session or increase recoveries."]
+                else:
+                    adherence = "poor"
+                    quality = "needs_improvement"
+                    insights = [f"Execution deviated from plan ({score:.0f}% compliance)."]
+                    recs = ["Prioritize recovery and adjust next workout intensity down."]
+
+            if interval_matching == "matched":
+                insights.append("Interval targets were matched against execution streams.")
+
             return {
                 "completed": True,
-                "adherence": "unknown",
-                "execution_quality": "unknown",
-                "insights": ["Workout completed"],
-                "recommendations": ["Review execution details"],
-                "summary": "Workout data available"
+                "adherence": adherence,
+                "execution_quality": quality,
+                "insights": insights,
+                "recommendations": recs,
+                "summary": "Workout analyzed using deterministic fallback"
             }
     
     def _fallback_debrief(
