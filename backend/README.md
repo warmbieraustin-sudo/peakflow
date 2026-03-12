@@ -1,10 +1,13 @@
 # PeakFlow Backend
 
-## Intervals.icu starter integration (Sprint Days 1-2)
+## Intervals.icu integration (Sprint Days 2-4)
 
-This module fetches:
-- daily wellness (weight, resting HR, HRV, sleep, CTL/ATL)
-- recent activities (NP, training load, decoupling, calories)
+Current capabilities:
+- fetch daily wellness (weight, resting HR, HRV, sleep, CTL/ATL)
+- fetch activities (NP, training load, decoupling, calories, kJ)
+- persist **Bronze** snapshots (raw source payloads)
+- persist **Silver** normalized records (`athlete_day`, `activities_by_day`)
+- compute freshness gate for morning-report readiness
 
 ## Setup
 
@@ -16,15 +19,28 @@ cp .env.example .env
 
 ## Run
 
+### Bronze only
 ```bash
 cd backend
 PYTHONPATH=. python3 scripts/intervals_snapshot.py --days 1 --write
 ```
 
-Or pull a custom range:
-
+### Bronze + Silver + freshness
 ```bash
-PYTHONPATH=. python3 scripts/intervals_snapshot.py --oldest 2026-03-01 --newest 2026-03-11 --write
+PYTHONPATH=. python3 scripts/intervals_snapshot.py --days 1 --write --silver --fresh-minutes 180
 ```
 
-Snapshot files are written to `backend/data/snapshots/`.
+### Custom range
+```bash
+PYTHONPATH=. python3 scripts/intervals_snapshot.py \
+  --oldest 2026-03-01 --newest 2026-03-11 \
+  --write --silver --fresh-minutes 180
+```
+
+## Output locations
+- Bronze snapshots: `backend/data/snapshots/`
+- Silver athlete_day: `backend/data/silver/athlete_day/YYYY-MM-DD.json`
+- Silver activities: `backend/data/silver/activities/YYYY-MM-DD.json`
+
+## Schemas
+See `backend/docs/SCHEMAS.md`.

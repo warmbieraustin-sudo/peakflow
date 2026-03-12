@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -96,6 +96,7 @@ def normalize_activity(row: Dict[str, Any]) -> Dict[str, Any]:
         "decoupling": row.get("decoupling"),
         "kj": (row.get("icu_joules") or 0) / 1000 if row.get("icu_joules") else None,
         "calories": row.get("calories"),
+        "source_updated": row.get("updated"),
     }
 
 
@@ -103,3 +104,91 @@ def day_bounds(days: int = 1) -> tuple[str, str]:
     end = date.today()
     start = end.fromordinal(end.toordinal() - max(days - 1, 0))
     return start.isoformat(), end.isoformat()
+
+
+def _parse_iso(ts: str | None) -> datetime | None:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def freshness_status(updated_iso: str | None, max_age_minutes: int = 180) -> Dict[str, Any]:
+    updated_dt = _parse_iso(updated_iso)
+    if not updated_dt:
+        return {
+            "is_fresh": False,
+            "reason": "missing_or_invalid_updated_timestamp",
+            "updated": updated_iso,
+            "age_minutes": None,
+            "max_age_minutes": max_age_minutes,
+        }
+
+    now = datetime.now(timezone.utc)
+    age_min = (now - updated_dt).total_seconds() / 60.0
+    return {
+        "is_fresh": age_min <= max_age_minutes,
+        "reason": "ok" if age_min <= max_age_minutes else "stale",
+        "updated": updated_dt.isoformat(),
+        "age_minutes": round(age_min, 1),
+        "max_age_minutes": max_age_minutes,
+    }
+
+
+def build_athlete_day(
+    day: str,
+    wellness_row: Dict[str, Any] | None,
+    activities: List[Dict[str, Any]],
+    max_age_minutes: int = 180,
+) -> Dict[str, Any]:
+    if not wellness_row:
+        wellness = None
+    elif "weight_kg" in wellness_row or "resting_hr" in wellness_row:
+        wellness = wellness_row
+    else:
+        wellness = normalize_wellness(wellness_row)
+    daily_activities = [a for a in activities if (a.get("start_date_local") or "").startswith(day)]
+
+    total_calories = sum((a.get("calories") or 0) for a in daily_activities)
+    total_kj = round(sum((a.get("kj") or 0.0) for a in daily_activities), 2)
+
+    if daily_activities:
+        weighted = [a.get("weighted_avg_watts") for a in daily_activities if a.get("weighted_avg_watts") is not None]
+        avg_np = round(sum(weighted) / len(weighted), 1) if weighted else None
+        total_load = round(sum((a.get("training_load") or 0) for a in daily_activities), 1)
+    else:
+        avg_np = None
+        total_load = 0.0
+
+    freshness = freshness_status((wellness or {}).get("updated"), max_age_minutes=max_age_minutes)
+
+    return {
+        "date": day,
+        "source": "intervals.icu",
+        "recovery": {
+            "weight_kg": (wellness or {}).get("weight_kg"),
+            "resting_hr": (wellness or {}).get("resting_hr"),
+            "hrv": (wellness or {}).get("hrv"),
+            "sleep_seconds": (wellness or {}).get("sleep_seconds"),
+            "sleep_score": (wellness or {}).get("sleep_score"),
+        },
+        "load": {
+            "ctl": (wellness or {}).get("ctl"),
+            "atl": (wellness or {}).get("atl"),
+            "ramp_rate": (wellness or {}).get("ramp_rate"),
+            "daily_training_load": total_load,
+        },
+        "activity_summary": {
+            "count": len(daily_activities),
+            "total_calories": total_calories,
+            "total_kj": total_kj,
+            "avg_np": avg_np,
+        },
+        "freshness": freshness,
+        "raw_refs": {
+            "wellness_updated": (wellness or {}).get("updated"),
+            "activity_ids": [a.get("id") for a in daily_activities],
+        },
+    }
