@@ -624,10 +624,73 @@ def summarize_recent_load(activities: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def decide_phase(summary: Dict[str, Any], fresh: bool = True) -> Dict[str, Any]:
+def _parse_race_dates(preferences: Dict[str, Any] | None) -> List[date]:
+    out: List[date] = []
+    for d in (preferences or {}).get("race_dates", []) or []:
+        try:
+            out.append(date.fromisoformat(str(d)[:10]))
+        except Exception:
+            continue
+    return sorted(out)
+
+
+def _days_to_next_race(start: date, race_dates: List[date]) -> int | None:
+    future = [rd for rd in race_dates if rd >= start]
+    if not future:
+        return None
+    return (future[0] - start).days
+
+
+def _block_week_index(start: date, block_weeks: int = 4) -> int:
+    # Stable weekly phase bucket based on ISO week number.
+    week_number = int(start.strftime("%V"))
+    return (week_number - 1) % max(1, block_weeks)
+
+
+def _volume_multiplier_for_week(phase: str, week_idx: int, block_weeks: int = 4) -> float:
+    # 3:1 default build structure with progressive overload.
+    if phase in ("deload", "taper"):
+        return 0.65 if phase == "taper" else 0.7
+    if phase == "base":
+        # base keeps intensity lower and volume stable-to-rising
+        return [0.9, 1.0, 1.05, 0.85][week_idx % 4]
+
+    # build/rebuild progressive overload
+    if block_weeks <= 3:
+        return [0.95, 1.05, 0.75][week_idx % 3]
+    return [0.9, 1.0, 1.1, 0.75][week_idx % 4]
+
+
+def decide_phase(
+    summary: Dict[str, Any],
+    fresh: bool = True,
+    preferences: Dict[str, Any] | None = None,
+    start: date | None = None,
+) -> Dict[str, Any]:
     last7 = float(summary.get("last7_load") or 0.0)
     prev_avg = float(summary.get("prev21_weekly_avg_load") or 0.0)
     hard = int(summary.get("hard_sessions_last7") or 0)
+
+    start_day = start or date.today()
+    race_dates = _parse_race_dates(preferences)
+    days_to_race = _days_to_next_race(start_day, race_dates)
+
+    # Calendar-driven race phases
+    if days_to_race is not None and days_to_race <= 14:
+        return {
+            "phase": "taper",
+            "reason": "race_within_14_days",
+            "polarization_target": {"easy": 0.9, "hard": 0.1},
+            "days_to_race": days_to_race,
+        }
+
+    if days_to_race is not None and days_to_race >= 84 and (prev_avg == 0 or last7 <= prev_avg * 0.95):
+        return {
+            "phase": "base",
+            "reason": "far_from_race_aerobic_development",
+            "polarization_target": {"easy": 0.88, "hard": 0.12},
+            "days_to_race": days_to_race,
+        }
 
     # tuned trigger: deload earlier when load spikes or hard-session density is high
     deload_trigger = (prev_avg > 0 and last7 > prev_avg * 1.2) or hard >= 3 or (not fresh and last7 > 0)
@@ -636,6 +699,7 @@ def decide_phase(summary: Dict[str, Any], fresh: bool = True) -> Dict[str, Any]:
             "phase": "deload",
             "reason": "high_recent_load_or_fatigue",
             "polarization_target": {"easy": 0.9, "hard": 0.1},
+            "days_to_race": days_to_race,
         }
 
     if prev_avg > 0 and last7 < prev_avg * 0.75:
@@ -643,16 +707,22 @@ def decide_phase(summary: Dict[str, Any], fresh: bool = True) -> Dict[str, Any]:
             "phase": "rebuild",
             "reason": "underload_recent_block",
             "polarization_target": {"easy": 0.8, "hard": 0.2},
+            "days_to_race": days_to_race,
         }
 
     return {
         "phase": "build",
         "reason": "normal_progression",
         "polarization_target": {"easy": 0.8, "hard": 0.2},
+        "days_to_race": days_to_race,
     }
 
 
 def _weekly_intensity_pattern(phase: str) -> List[str]:
+    if phase == "taper":
+        return ["easy", "moderate", "easy", "rest", "easy", "openers", "race"]
+    if phase == "base":
+        return ["easy", "moderate", "easy", "easy", "moderate", "easy", "rest"]
     if phase == "deload":
         return ["easy", "easy", "easy", "rest", "easy", "moderate", "rest"]
     if phase == "rebuild":
@@ -675,10 +745,13 @@ def build_horizon_plan(
     fresh = bool((morning.get("headline") or {}).get("fresh", True))
 
     summary = summarize_recent_load(recent_activities or [])
-    phase = decide_phase(summary, fresh=fresh)
+    start = date.today()
+    phase = decide_phase(summary, fresh=fresh, preferences=preferences, start=start)
     pattern = _weekly_intensity_pattern(phase["phase"])
 
-    start = date.today()
+    block_weeks = int((preferences or {}).get("block_weeks") or 4)
+    week_idx = _block_week_index(start, block_weeks=block_weeks)
+    volume_multiplier = _volume_multiplier_for_week(phase["phase"], week_idx, block_weeks=block_weeks)
     days: List[Dict[str, Any]] = []
     
     # For day 0 (today), use same logic as build_daily_recommendation to ensure consistency
@@ -693,6 +766,11 @@ def build_horizon_plan(
         # honor explicit activity selection on day0; default to focus sport cadence later
         day_sport = sport if i == 0 else (focus_sport or sport)
 
+        # map special labels into template intensity while preserving displayed label
+        template_intensity = intensity
+        if intensity in ("openers", "race"):
+            template_intensity = "moderate" if intensity == "openers" else "hard"
+
         if intensity == "rest":
             plan = {
                 "schema_version": "v1-modality-agnostic",
@@ -701,12 +779,17 @@ def build_horizon_plan(
                 "blocks": [{"label": "recovery", "duration_sec": 1200, "target_type": "rpe", "target_low": 1, "target_high": 2}],
             }
         else:
-            t = _templates_for_sport(day_sport, "easy" if intensity == "rest" else intensity)
+            t = _templates_for_sport(day_sport, template_intensity)
+            scaled_blocks = []
+            for b in t["blocks"]:
+                dur = int((b.get("duration_sec") or 0) * volume_multiplier)
+                scaled_blocks.append({**b, "duration_sec": max(300, dur)})
             plan = {
                 "schema_version": "v1-modality-agnostic",
                 "sport_type": day_sport,
-                "title": t["title"],
-                "blocks": t["blocks"],
+                "title": t["title"] if intensity not in ("openers", "race") else ("Race Openers" if intensity == "openers" else "Race Day Effort"),
+                "blocks": scaled_blocks,
+                "volume_multiplier": round(volume_multiplier, 2),
             }
 
         days.append(
@@ -716,6 +799,7 @@ def build_horizon_plan(
                 "sport_type": day_sport,
                 "intensity_band": intensity,
                 "plan": plan,
+                "week_index": i // 7,
             }
         )
 
@@ -728,6 +812,14 @@ def build_horizon_plan(
             "reason": phase["reason"],
             "polarization_target": phase["polarization_target"],
             "recent_load_summary": summary,
+            "days_to_race": phase.get("days_to_race"),
+            "race_dates": (preferences or {}).get("race_dates", []),
+            "block_periodization": {
+                "enabled": True,
+                "block_weeks": block_weeks,
+                "current_block_week": week_idx + 1,
+                "progressive_overload_multiplier": round(volume_multiplier, 2),
+            },
         },
         "days": days,
     }
@@ -776,8 +868,15 @@ def build_coach_mode_horizon(
     focus_sport: str | None = None,
     recent_activities: List[Dict[str, Any]] | None = None,
     start_day: str | None = None,
+    preferences: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    base = build_horizon_plan(shell_payload, selected_sport, focus_sport=focus_sport, recent_activities=recent_activities)
+    base = build_horizon_plan(
+        shell_payload,
+        selected_sport,
+        focus_sport=focus_sport,
+        recent_activities=recent_activities,
+        preferences=preferences,
+    )
 
     start = date.fromisoformat(start_day) if start_day else date.today()
     end = start + timedelta(days=27)

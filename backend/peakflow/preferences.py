@@ -2,6 +2,7 @@
 Athlete preferences schema and defaults.
 """
 from typing import Dict, Any, List, Optional
+from datetime import datetime
 
 
 DEFAULT_PREFERENCES = {
@@ -11,6 +12,8 @@ DEFAULT_PREFERENCES = {
     "height_cm": None,  # Height in cm (optional)
     "weight_kg": None,  # Current weight in kg (optional, auto-populated from Garmin)
     "units": "imperial",  # Display units: "imperial" or "metric"
+    "race_dates": [],  # Optional ISO dates for target races (calendar-aware periodization)
+    "block_weeks": 4,  # Block periodization cycle length (default 3:1 build/deload)
 }
 
 
@@ -84,5 +87,28 @@ def validate_preferences(prefs: Dict[str, Any]) -> Dict[str, Any]:
         units = str(prefs["units"]).strip().lower()
         if units in ("imperial", "metric"):
             validated["units"] = units
+
+    # Optional race dates (ISO yyyy-mm-dd)
+    if "race_dates" in prefs:
+        dates = prefs.get("race_dates")
+        if isinstance(dates, list):
+            parsed: List[str] = []
+            for d in dates:
+                try:
+                    iso = str(d).strip()[:10]
+                    datetime.fromisoformat(iso)
+                    parsed.append(iso)
+                except Exception:
+                    continue
+            validated["race_dates"] = sorted(list(set(parsed)))
+
+    # Block periodization cycle length
+    if "block_weeks" in prefs:
+        try:
+            bw = int(prefs["block_weeks"])
+            if 3 <= bw <= 6:
+                validated["block_weeks"] = bw
+        except Exception:
+            pass
     
     return validated

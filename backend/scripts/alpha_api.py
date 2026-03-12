@@ -396,7 +396,14 @@ class AlphaHandler(BaseHTTPRequestHandler):
                 recent_activities = icu.activities(oldest, newest)
 
                 if coach_mode:
-                    payload = build_coach_mode_horizon(shell, sport, focus_sport=focus_sport, recent_activities=recent_activities, start_day=day)
+                    payload = build_coach_mode_horizon(
+                        shell,
+                        sport,
+                        focus_sport=focus_sport,
+                        recent_activities=recent_activities,
+                        start_day=day,
+                        preferences=prefs,
+                    )
                 else:
                     payload = build_horizon_plan(shell, sport, focus_sport=focus_sport, recent_activities=recent_activities, preferences=prefs)
                 payload["athlete_id"] = athlete_id

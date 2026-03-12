@@ -814,6 +814,11 @@ function renderPlan(horizon) {
         ${horizon?.periodization?.phase || '—'}
       </div>
       <div class="muted" style="margin-top: 6px;">${horizon?.periodization?.reason || 'Planning next week...'}</div>
+      <div class="muted" style="margin-top: 8px; font-size: 12px;">
+        ${horizon?.periodization?.days_to_race != null ? `🏁 ${horizon.periodization.days_to_race} days to race` : '🏁 No race date set'}
+        ${horizon?.periodization?.block_periodization?.enabled ? ` • Block week ${horizon.periodization.block_periodization.current_block_week}/${horizon.periodization.block_periodization.block_weeks}` : ''}
+        ${horizon?.periodization?.block_periodization?.progressive_overload_multiplier ? ` • Vol x${horizon.periodization.block_periodization.progressive_overload_multiplier}` : ''}
+      </div>
       ${advanced && horizon?.coach_mode ? `
         <div class="muted" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
           Coach Mode: ON • TP days: ${horizon?.coach_horizon_summary?.tp_days_with_plan || 0}/${horizon?.coach_horizon_summary?.total_days || 7}
