@@ -53,6 +53,11 @@ PYTHONPATH=. python3 scripts/get_latest_athlete_day.py
 PYTHONPATH=. python3 scripts/build_daily_gold.py --write --log-conflicts
 ```
 
+### Inspect merge conflicts
+```bash
+PYTHONPATH=. python3 scripts/show_conflicts.py --limit 10
+```
+
 ### First consumer: morning readiness gate
 ```bash
 PYTHONPATH=. python3 scripts/check_recovery_freshness.py --fresh-minutes 180
