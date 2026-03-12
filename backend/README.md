@@ -127,7 +127,7 @@ Default endpoints:
 - `GET /api/alpha/shell/YYYY-MM-DD`
 - `GET /api/alpha/workout/latest?day=YYYY-MM-DD`
 - `GET /api/alpha/planner/modalities`
-- `GET /api/alpha/planner/recommendation?sport=cycling&focusSport=cycling`
+- `GET /api/alpha/planner/recommendation?sport=cycling&focusSport=cycling&feedbackDay=YYYY-MM-DD`
 
 Auth:
 - set `PEAKFLOW_ALPHA_TOKEN` to require `Authorization: Bearer <token>`

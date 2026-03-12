@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import date, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -147,8 +148,13 @@ class AlphaHandler(BaseHTTPRequestHandler):
                 day = (q.get("day") or [None])[0]
                 sport = (q.get("sport") or ["cycling"])[0]
                 focus_sport = (q.get("focusSport") or [None])[0]
+                feedback_day = (q.get("feedbackDay") or [None])[0]
+                if not feedback_day:
+                    feedback_day = (date.today() - timedelta(days=1)).isoformat()
+
                 shell = build_alpha_shell_payload(SILVER_DIR, day=day)
-                payload = build_daily_recommendation(shell, sport, focus_sport=focus_sport)
+                review = build_latest_workout_review(day=feedback_day)
+                payload = build_daily_recommendation(shell, sport, focus_sport=focus_sport, last_review=review)
                 return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
 
             return _json(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "not_found"})
