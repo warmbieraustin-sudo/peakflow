@@ -20,6 +20,7 @@ from peakflow.planner import (
     build_daily_recommendation,
     build_horizon_plan,
 )
+from peakflow.llm_client import LLMClient
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT.parent / "frontend"
@@ -204,6 +205,7 @@ class AlphaHandler(BaseHTTPRequestHandler):
                             "/api/alpha/planner/recommendation?sport=cycling",
                             "/api/alpha/planner/recommendation?sport=cycling&coachMode=true",
                             "/api/alpha/planner/horizon?sport=cycling&focusSport=cycling",
+                            "/api/alpha/llm/debrief/today",
                         ],
                     },
                 )
@@ -348,6 +350,44 @@ class AlphaHandler(BaseHTTPRequestHandler):
                     payload = build_horizon_plan(shell, sport, focus_sport=focus_sport, recent_activities=recent_activities)
                 payload["athlete_id"] = athlete_id
                 return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
+
+            if path == "/api/alpha/llm/debrief/today":
+                try:
+                    # Get today's shell payload for recovery data
+                    shell = build_alpha_shell_payload(SILVER_DIR, day=None)
+                    if not shell:
+                        return _json(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "no_recovery_data"})
+                    
+                    # Get yesterday's workout review
+                    yesterday = (date.today() - timedelta(days=1)).isoformat()
+                    yesterday_workout = build_latest_workout_review(day=yesterday)
+                    
+                    # Extract recovery and load data
+                    recovery_raw = shell.get("screens", {}).get("recovery_load", {}).get("recovery", {})
+                    load_raw = shell.get("screens", {}).get("recovery_load", {}).get("load", {})
+                    
+                    # Initialize LLM client
+                    llm = LLMClient()
+                    
+                    # Generate debrief
+                    debrief = llm.generate_debrief(
+                        recovery=recovery_raw,
+                        yesterday_workout=yesterday_workout,
+                        load=load_raw
+                    )
+                    
+                    return _json(self, HTTPStatus.OK, {
+                        "ok": True,
+                        "debrief": debrief.model_dump(),
+                        "cached": False
+                    })
+                    
+                except Exception as e:
+                    return _json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "ok": False,
+                        "error": "llm_generation_failed",
+                        "detail": str(e)
+                    })
 
             return _json(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "not_found"})
 

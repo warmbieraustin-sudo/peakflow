@@ -41,6 +41,12 @@ async function fetchWorkoutReview(day) {
   return r.body.payload;
 }
 
+async function fetchLLMDebrief() {
+  const r = await apiGet('/api/alpha/llm/debrief/today');
+  if (!r.ok) return null; // fallback to deterministic
+  return r.body.debrief;
+}
+
 const SPORT_KEY = 'peakflow_selected_sport';
 const FOCUS_SPORT_KEY = 'peakflow_focus_sport';
 const ATHLETE_FEEDBACK_KEY = 'peakflow_athlete_feedback';
@@ -319,14 +325,19 @@ function buildDailyDebrief(rec, review) {
   return `Recovery signals are in. Use today's recommendation and check in after training so we can adapt tomorrow.`;
 }
 
-function renderRecovery(p, review) {
+function renderRecovery(p, review, llmDebrief) {
   const r = p.screens.recovery_load || {};
   const m = p.screens.morning_brief || {};
   const rec = r.recovery || {};
   const load = r.load || {};
   const act = r.activity_summary || {};
   const sleepHours = rec.sleep_seconds ? (rec.sleep_seconds / 3600).toFixed(1) : '—';
-  const debrief = buildDailyDebrief(rec, review);
+  
+  // Use LLM debrief if available, otherwise fallback to deterministic
+  const debrief = llmDebrief 
+    ? `<div style="font-weight: 600; margin-bottom: 8px;">${llmDebrief.headline}</div><div>${llmDebrief.debrief}</div><div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-weight: 500;">Today's Focus: ${llmDebrief.today_focus}</div>`
+    : buildDailyDebrief(rec, review);
+  
   const freshStatus = m.headline?.fresh ? '✅ Fresh' : '⚠️ Stale';
   const freshMins = m.headline?.freshness_age_minutes ?? '—';
 
@@ -704,7 +715,8 @@ async function render() {
       // Default to recovery view for / and /recovery
       const payload = await fetchPayload();
       const yesterdayReview = await fetchWorkoutReview(getYesterdayISO());
-      app.innerHTML = renderRecovery(payload, yesterdayReview);
+      const llmDebrief = await fetchLLMDebrief();
+      app.innerHTML = renderRecovery(payload, yesterdayReview, llmDebrief);
     }
   } catch (e) {
     app.innerHTML = `<div class='card'>Error: ${e.message}</div>`;
