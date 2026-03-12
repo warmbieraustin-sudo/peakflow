@@ -649,6 +649,12 @@ def build_coach_mode_horizon(
         "recent_load_summary": summary,
     }
 
+    # Recompute displayed intensity bands from final coach phase
+    phase_for_pattern = "build" if coach_phase["phase"] == "coach_guided_build" else coach_phase["phase"]
+    pattern = _weekly_intensity_pattern(phase_for_pattern)
+    for i, d in enumerate(base.get("days", [])):
+        d["intensity_band"] = pattern[i % 7]
+
     base.update(
         {
             "coach_mode": True,

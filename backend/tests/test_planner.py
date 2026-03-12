@@ -186,6 +186,7 @@ class PlannerTests(unittest.TestCase):
         self.assertIn("coach_horizon_summary", horizon)
         self.assertEqual(horizon["days"][0]["plan_source"], "trainingpeaks")
         self.assertEqual(horizon["periodization"]["phase"], "coach_guided_build")
+        self.assertEqual(horizon["days"][0]["intensity_band"], "moderate")
 
 
 if __name__ == "__main__":
