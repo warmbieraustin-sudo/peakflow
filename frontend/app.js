@@ -64,7 +64,63 @@ function renderChat(p) {
 }
 
 function renderWorkout(w) {
-  return `<div class="card"><pre>${JSON.stringify(w, null, 2)}</pre></div>`;
+  const presc = w.prescription;
+  const exec = w.execution;
+  const analysis = w.analysis;
+  
+  const prescStatus = presc.status === 'ok' ? '✅ Available' : '⚠️ Unavailable';
+  const execStatus = exec.status === 'ok' ? '✅ Completed' : '⚠️ Not done';
+  
+  let content = `
+    <div class="card">
+      <h2>${w.date}</h2>
+      <div class="row">
+        ${card('Prescription', prescStatus)}
+        ${card('Execution', execStatus)}
+      </div>
+    </div>
+  `;
+  
+  if (presc.status === 'ok') {
+    content += `<div class="card">
+      <div class="label">Planned Workout</div>
+      <div class="value">${presc.workout_title || '—'}</div>
+      <div class="row">
+        ${card('Planned TSS', presc.planned_tss ?? '—')}
+        ${card('Intervals', presc.intervals?.length ?? 0)}
+      </div>
+    </div>`;
+  }
+  
+  if (exec.status === 'ok' && exec.activity) {
+    const a = exec.activity;
+    content += `<div class="card">
+      <div class="label">Executed Workout</div>
+      <div class="value">${a.name || '—'}</div>
+      <div class="row">
+        ${card('Avg Watts', a.avg_watts ?? '—')}
+        ${card('Weighted Avg', a.weighted_avg_watts ?? '—')}
+        ${card('Avg HR', a.avg_hr ?? '—')}
+        ${card('Training Load', a.training_load ?? '—')}
+      </div>
+      <div class="row">
+        ${card('Intensity', a.intensity ?? '—')}
+        ${card('Decoupling %', a.decoupling ?? '—')}
+      </div>
+    </div>`;
+  }
+  
+  if (analysis.interval_matching === 'matched' && analysis.intervals?.length) {
+    const intervals = analysis.intervals.map(i => 
+      `<div style="margin: 4px 0;">${i.label}: ${i.target_range} → ${i.executed_watts}w ${i.hit ? '✅' : '⚠️'}</div>`
+    ).join('');
+    content += `<div class="card">
+      <div class="label">Interval Matching</div>
+      ${intervals}
+    </div>`;
+  }
+  
+  return content;
 }
 
 function routeName() {

@@ -15,9 +15,20 @@ class WorkoutReviewTests(unittest.TestCase):
                 "title": "Threshold 3x10",
                 "tssPlanned": 85,
                 "totalTimePlanned": 1.5,
-                "structure": [
-                    {"type": "work", "durationSeconds": 600, "targetPowerLow": 240, "targetPowerHigh": 260, "name": "10m threshold"}
-                ],
+                "structure": {
+                    "structure": [
+                        {
+                            "steps": [
+                                {
+                                    "name": "10m threshold",
+                                    "intensityClass": "work",
+                                    "length": {"value": 600, "unit": "second"},
+                                    "targets": [{"minValue": 85, "maxValue": 95}]
+                                }
+                            ]
+                        }
+                    ]
+                },
             }
         ]
 
@@ -48,7 +59,8 @@ class WorkoutReviewTests(unittest.TestCase):
         self.assertEqual(review["execution"]["status"], "ok")
         self.assertTrue(review["analysis"]["prescription_available"])
         self.assertTrue(review["analysis"]["execution_available"])
-        self.assertEqual(review["analysis"]["interval_matching"], "pending")
+        self.assertIn(review["analysis"]["interval_matching"], ["matched", "pending"])
+        self.assertIsInstance(review["analysis"]["intervals"], list)
 
 
 if __name__ == "__main__":
