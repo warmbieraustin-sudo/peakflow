@@ -408,6 +408,39 @@ def evaluate_plan_execution(plan: Dict[str, Any], execution_activity: Optional[D
     }
 
 
+def _infer_intensity(activity: Dict[str, Any]) -> str:
+    """Infer workout intensity from power/pace data when not provided by source."""
+    
+    # Prefer weighted average power (normalized power proxy) over simple average
+    avg_watts = activity.get("icu_weighted_avg_watts") or activity.get("average_watts")
+    ftp = activity.get("icu_ftp") or activity.get("icu_pm_ftp_watts")
+    
+    # For cycling: use power/FTP
+    if avg_watts and ftp and ftp > 0:
+        pct_ftp = (avg_watts / ftp) * 100
+        if pct_ftp < 65:
+            return "easy"
+        elif pct_ftp < 85:
+            return "moderate"
+        else:
+            return "hard"
+    
+    # Fallback: use training load if available
+    training_load = activity.get("icu_training_load")
+    moving_time = activity.get("moving_time")
+    if training_load and moving_time and moving_time > 0:
+        load_per_hour = (training_load / moving_time) * 3600
+        if load_per_hour < 50:
+            return "easy"
+        elif load_per_hour < 80:
+            return "moderate"
+        else:
+            return "hard"
+    
+    # Default fallback
+    return "moderate"
+
+
 def build_latest_workout_review(day: str | None = None) -> Dict[str, Any]:
     target_day = day or date.today().isoformat()
 
@@ -453,6 +486,10 @@ def build_latest_workout_review(day: str | None = None) -> Dict[str, Any]:
     streams: List[Dict[str, Any]] = []
 
     if latest:
+        # Always infer intensity classification from power/HR data
+        # (ICU provides numeric intensity, we need categorical: easy/moderate/hard)
+        inferred_intensity = _infer_intensity(latest)
+        
         execution["activity"] = {
             "id": latest.get("id"),
             "name": latest.get("name"),
@@ -462,10 +499,12 @@ def build_latest_workout_review(day: str | None = None) -> Dict[str, Any]:
             "weighted_avg_watts": latest.get("icu_weighted_avg_watts"),
             "avg_hr": latest.get("average_heartrate"),
             "training_load": latest.get("icu_training_load"),
-            "intensity": latest.get("icu_intensity"),
+            "intensity": inferred_intensity,
+            "icu_intensity_raw": latest.get("icu_intensity"),  # preserve raw ICU value
             "decoupling": latest.get("decoupling"),
             "calories": latest.get("calories"),
             "ftp": latest.get("icu_ftp") or latest.get("icu_pm_ftp_watts"),
+            "sport_type": latest.get("type", "cycling").lower(),
         }
         try:
             streams = icu.activity_streams(str(latest.get("id")))

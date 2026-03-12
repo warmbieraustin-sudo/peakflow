@@ -456,13 +456,32 @@ class LLMClient:
             hard_count = intensities.count('hard') + intensities.count('moderate')
             prompt_parts.append(f"- Easy: {easy_count}, Hard: {hard_count}")
         
-        # Recovery trend
+        # Recovery trend with more detail
         if recovery_trend:
-            avg_sleep = sum(r.get('sleep_score', 0) for r in recovery_trend) / len(recovery_trend)
-            avg_hrv = sum(r.get('hrv', 0) for r in recovery_trend) / len(recovery_trend)
-            prompt_parts.append(f"\n**Recovery trend (last {len(recovery_trend)} days):**")
-            prompt_parts.append(f"- Avg sleep score: {avg_sleep:.0f}/100")
-            prompt_parts.append(f"- Avg HRV: {avg_hrv:.0f}ms")
+            sleep_scores = [r.get('sleep_score', 0) for r in recovery_trend if r.get('sleep_score')]
+            hrv_values = [r.get('hrv', 0) for r in recovery_trend if r.get('hrv')]
+            
+            if sleep_scores:
+                avg_sleep = sum(sleep_scores) / len(sleep_scores)
+                min_sleep = min(sleep_scores)
+                max_sleep = max(sleep_scores)
+                prompt_parts.append(f"\n**Recovery trend (last {len(recovery_trend)} days):**")
+                prompt_parts.append(f"- Sleep score: avg {avg_sleep:.0f}/100, range {min_sleep:.0f}-{max_sleep:.0f}")
+            
+            if hrv_values:
+                avg_hrv = sum(hrv_values) / len(hrv_values)
+                min_hrv = min(hrv_values)
+                max_hrv = max(hrv_values)
+                prompt_parts.append(f"- HRV: avg {avg_hrv:.0f}ms, range {min_hrv:.0f}-{max_hrv:.0f}ms")
+                
+            # Highlight last 3 days specifically
+            recent_3 = recovery_trend[:3]  # most recent 3 days
+            if len(recent_3) >= 2:
+                recent_sleep = [r.get('sleep_score') for r in recent_3 if r.get('sleep_score')]
+                if recent_sleep:
+                    prompt_parts.append(f"- Last 3 nights sleep: {', '.join(str(int(s)) for s in recent_sleep)}")
+            
+            prompt_parts.append("**IMPORTANT:** Analyze the 14-day TREND, not just the most recent night. Look for patterns, consistency, and changes over time.")
         
         # Load trend
         if load_trend:
