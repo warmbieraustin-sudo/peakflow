@@ -8,6 +8,7 @@ Current capabilities:
 - persist **Bronze** snapshots (raw source payloads)
 - persist **Silver** normalized records (`athlete_day`, `activities_by_day`)
 - compute freshness gate for morning-report readiness
+- expose a single automation entrypoint: `get_daily_metrics()`
 
 ## Setup
 
@@ -35,6 +36,17 @@ PYTHONPATH=. python3 scripts/intervals_snapshot.py --days 1 --write --silver --f
 PYTHONPATH=. python3 scripts/intervals_snapshot.py \
   --oldest 2026-03-01 --newest 2026-03-11 \
   --write --silver --fresh-minutes 180
+```
+
+### Single function/automation entrypoint
+```bash
+PYTHONPATH=. python3 scripts/get_daily_metrics.py --compact --fresh-minutes 180
+```
+
+### First consumer: morning readiness gate
+```bash
+PYTHONPATH=. python3 scripts/check_recovery_freshness.py --fresh-minutes 180
+# exit 0 => ready, exit 1 => not ready
 ```
 
 ## Output locations
