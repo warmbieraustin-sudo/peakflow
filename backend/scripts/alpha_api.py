@@ -482,7 +482,6 @@ class AlphaHandler(BaseHTTPRequestHandler):
             if path == "/api/alpha/llm/analysis":
                 try:
                     # Get recent workouts (last 14 days)
-                    from datetime import timedelta
                     end_date = date.today()
                     start_date_analysis = end_date - timedelta(days=14)
                     
