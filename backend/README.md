@@ -43,6 +43,11 @@ PYTHONPATH=. python3 scripts/intervals_snapshot.py \
 PYTHONPATH=. python3 scripts/get_daily_metrics.py --compact --fresh-minutes 180
 ```
 
+### Query latest stored athlete_day (for automations)
+```bash
+PYTHONPATH=. python3 scripts/get_latest_athlete_day.py
+```
+
 ### First consumer: morning readiness gate
 ```bash
 PYTHONPATH=. python3 scripts/check_recovery_freshness.py --fresh-minutes 180
@@ -53,6 +58,9 @@ PYTHONPATH=. python3 scripts/check_recovery_freshness.py --fresh-minutes 180
 - Bronze snapshots: `backend/data/snapshots/`
 - Silver athlete_day: `backend/data/silver/athlete_day/YYYY-MM-DD.json`
 - Silver activities: `backend/data/silver/activities/YYYY-MM-DD.json`
+- Silver index: `backend/data/silver/index.json`
+
+Silver writes are deterministic overwrite-by-day (no append/merge drift).
 
 ## Schemas
 - Human-readable contracts: `backend/docs/SCHEMAS.md`

@@ -102,8 +102,10 @@ def main() -> None:
         silver_base = Path(__file__).resolve().parents[1] / "data" / "silver"
         silver_paths = persist_silver(silver_base, athlete_days, activities_by_day)
         print("wrote silver artifacts:")
-        for kind, paths in silver_paths.items():
-            print(f"  {kind}: {len(paths)} files")
+        print(f"  athlete_day: {len(silver_paths.get('athlete_day', []))} files")
+        print(f"  activities: {len(silver_paths.get('activities', []))} files")
+        if silver_paths.get("index"):
+            print(f"  index: {silver_paths['index']}")
 
     print(f"Range: {oldest} → {newest}")
     print(f"Wellness rows: {len(wellness_rows)} | Activities: {len(activity_rows)}")
