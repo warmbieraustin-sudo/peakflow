@@ -113,6 +113,7 @@ PYTHONPATH=. python3 scripts/pwa_payload.py --write
 
 Contract doc: `backend/docs/ALPHA_UI_CONTRACT.md`
 Workout review contract: `backend/docs/WORKOUT_REVIEW_CONTRACT.md` (includes LLM-plan support + tiered matching/confidence)
+Beta onboarding checklist: `backend/docs/BETA_ONBOARDING_CHECKLIST.md`
 
 ## Alpha API + shell routes (Day 15/16)
 ```bash

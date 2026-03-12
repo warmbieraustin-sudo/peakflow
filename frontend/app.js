@@ -35,7 +35,7 @@ const SPORT_KEY = 'peakflow_selected_sport';
 const FOCUS_SPORT_KEY = 'peakflow_focus_sport';
 const ATHLETE_FEEDBACK_KEY = 'peakflow_athlete_feedback';
 const COACH_MODE_KEY = 'peakflow_coach_mode';
-const ATHLETE_ID = 'default';
+const ATHLETE_ID_KEY = 'peakflow_athlete_id';
 
 function getSelectedSport() {
   return localStorage.getItem(SPORT_KEY) || 'cycling';
@@ -70,14 +70,30 @@ function setCoachMode(on) {
   localStorage.setItem(COACH_MODE_KEY, on ? '1' : '0');
 }
 
+function getAthleteId() {
+  return localStorage.getItem(ATHLETE_ID_KEY) || 'default';
+}
+
+function setAthleteId(v) {
+  if (!v) localStorage.removeItem(ATHLETE_ID_KEY);
+  else localStorage.setItem(ATHLETE_ID_KEY, v.trim());
+}
+
 async function fetchModalities() {
   const r = await apiGet('/api/alpha/planner/modalities');
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.modalities || [];
 }
 
-async function fetchPlanRecommendation(sport, focusSport, athleteFeedback, coachMode) {
-  const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '', athleteId: ATHLETE_ID });
+async function fetchPlannerState(athleteId) {
+  const qs = new URLSearchParams({ athleteId: athleteId || 'default' });
+  const r = await apiGet(`/api/alpha/planner/state?${qs.toString()}`);
+  if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
+  return r.body.state || {};
+}
+
+async function fetchPlanRecommendation(sport, focusSport, athleteFeedback, coachMode, athleteId) {
+  const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '', athleteId: athleteId || 'default' });
   if (athleteFeedback) qs.set('athleteFeedback', athleteFeedback);
   if (coachMode) qs.set('coachMode', 'true');
   const r = await apiGet(`/api/alpha/planner/recommendation?${qs.toString()}`);
@@ -85,8 +101,8 @@ async function fetchPlanRecommendation(sport, focusSport, athleteFeedback, coach
   return r.body.payload;
 }
 
-async function fetchPlanHorizon(sport, focusSport) {
-  const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '', athleteId: ATHLETE_ID });
+async function fetchPlanHorizon(sport, focusSport, athleteId) {
+  const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '', athleteId: athleteId || 'default' });
   if (getCoachMode()) qs.set('coachMode', 'true');
   const r = await apiGet(`/api/alpha/planner/horizon?${qs.toString()}`);
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
@@ -220,7 +236,10 @@ function renderPlan(modalities, recommendation, horizon) {
 
   return `
     <div class="card">
-      <div class="label">Today's Activity</div>
+      <div class="label">Athlete</div>
+      <input id="athleteIdInput" value="${getAthleteId()}" placeholder="athlete id" />
+      <button id="applyAthleteBtn">Load Athlete</button>
+      <div class="label" style="margin-top:8px;">Today's Activity</div>
       <select id="sportSelect">${options}</select>
       <button id="applySportBtn">Apply</button>
       <div style="margin-top:8px;">
@@ -252,12 +271,20 @@ function renderPlan(modalities, recommendation, horizon) {
 }
 
 function attachPlanHandlers() {
+  const athleteInput = document.getElementById('athleteIdInput');
+  const athleteBtn = document.getElementById('applyAthleteBtn');
   const select = document.getElementById('sportSelect');
   const btn = document.getElementById('applySportBtn');
   const coachToggle = document.getElementById('coachModeToggle');
   const fbEasy = document.getElementById('fbEasyBtn');
   const fbOk = document.getElementById('fbOkBtn');
   const fbHard = document.getElementById('fbHardBtn');
+  if (athleteInput && athleteBtn) {
+    athleteBtn.addEventListener('click', async () => {
+      setAthleteId(athleteInput.value || 'default');
+      await render();
+    });
+  }
   if (select && btn) {
     btn.addEventListener('click', async () => {
       setSelectedSport(select.value);
@@ -299,14 +326,24 @@ async function render() {
       const workout = await fetchWorkoutReview();
       app.innerHTML = renderWorkout(workout);
     } else if (r === '/plan') {
-      const selected = getSelectedSport();
-      const focus = getFocusSport();
-      const athleteFeedback = getAthleteFeedback();
-      const coachMode = getCoachMode();
+      const athleteId = getAthleteId();
+      const serverState = await fetchPlannerState(athleteId);
+
+      const selected = serverState.selected_sport || getSelectedSport();
+      const focus = serverState.focus_sport || getFocusSport();
+      const athleteFeedback = serverState.athlete_feedback || getAthleteFeedback();
+      const coachMode = (typeof serverState.coach_mode === 'boolean') ? serverState.coach_mode : getCoachMode();
+
+      // keep local cache aligned for UI continuity
+      setSelectedSport(selected);
+      if (focus) setFocusSport(focus);
+      if (athleteFeedback) setAthleteFeedback(athleteFeedback);
+      setCoachMode(coachMode);
+
       const [modalities, recommendation, horizon] = await Promise.all([
         fetchModalities(),
-        fetchPlanRecommendation(selected, focus, athleteFeedback, coachMode),
-        fetchPlanHorizon(selected, focus),
+        fetchPlanRecommendation(selected, focus, athleteFeedback, coachMode, athleteId),
+        fetchPlanHorizon(selected, focus, athleteId),
       ]);
       app.innerHTML = renderPlan(modalities, recommendation, horizon);
       attachPlanHandlers();
