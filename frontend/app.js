@@ -28,6 +28,20 @@ async function apiGet(path) {
   return { ok: res.ok, status: res.status, body };
 }
 
+async function apiPost(path, data) {
+  const token = getToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(path, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(data)
+  });
+  const body = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, body };
+}
+
 async function fetchPayload() {
   const r = await apiGet('/api/alpha/shell/today');
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
@@ -77,6 +91,32 @@ async function fetchLLMAnalysis(forceRefresh = false) {
     cached: r.body.cached || false,
     generated_at: r.body.generated_at
   };
+}
+
+async function fetchPreferences() {
+  const athleteId = getAthleteId();
+  const r = await apiGet(`/api/alpha/preferences?athleteId=${encodeURIComponent(athleteId)}`);
+  if (!r.ok) return null;
+  return r.body.preferences;
+}
+
+async function savePreferences(prefs) {
+  const athleteId = getAthleteId();
+  const r = await apiPost('/api/alpha/preferences', {
+    athleteId,
+    preferences: prefs
+  });
+  return r.ok;
+}
+
+async function sendChatMessage(message) {
+  const athleteId = getAthleteId();
+  const r = await apiPost('/api/alpha/llm/chat', {
+    athleteId,
+    message
+  });
+  if (!r.ok) throw new Error(r.body.error || 'chat_failed');
+  return r.body.response;
 }
 
 const SPORT_KEY = 'peakflow_selected_sport';
@@ -814,13 +854,112 @@ function attachAnalysisHandlers() {
   }
 }
 
-function renderChat() {
+function renderChat(messages = []) {
+  const messagesHtml = messages.length > 0
+    ? messages.map(m => `
+        <div style="margin-bottom: 16px;">
+          <div style="font-size: 12px; color: var(--muted); margin-bottom: 4px; font-weight: 600;">
+            ${m.role === 'user' ? 'You' : 'PeakFlow'}
+          </div>
+          <div style="padding: 12px; background: ${m.role === 'user' ? 'var(--card)' : 'var(--accent-dim, #1a2942)'}; border-radius: 12px; line-height: 1.6;">
+            ${m.content}
+          </div>
+        </div>
+      `).join('')
+    : '<div class="muted" style="text-align: center; padding: 40px 20px;">Ask me anything about your training, recovery, or how to use PeakFlow!</div>';
+  
   return `
     <div class="card">
-      <div class="label">Chat</div>
-      <div class="muted" style="padding: 40px 20px; text-align: center;">
-        Chat interface coming soon!<br><br>
-        Will support conversational Q&A and plan modifications.
+      <div class="label">Chat with PeakFlow</div>
+      <div style="max-height: 400px; overflow-y: auto; margin-bottom: 16px;" id="chatMessages">
+        ${messagesHtml}
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <input
+          type="text"
+          id="chatInput"
+          placeholder="Ask about training, recovery, or app features..."
+          style="flex: 1; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text);"
+        />
+        <button id="chatSendBtn" style="padding: 12px 24px; background: var(--accent); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;">
+          Send
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderPreferences(prefs = {}) {
+  const sports = prefs.sports || ['cycling'];
+  const weeklyHours = prefs.weekly_hours || 10;
+  const goals = prefs.goals || '';
+  const heightCm = prefs.height_cm || '';
+  const weightKg = prefs.weight_kg || '';
+  
+  return `
+    <div class="card">
+      <div class="label">Your Preferences</div>
+      
+      <div style="margin-top: 20px;">
+        <label style="display: block; margin-bottom: 8px; font-weight: 600;">Sports</label>
+        <div style="display: flex; flex-wrap: gap; gap: 8px; margin-bottom: 16px;">
+          ${['cycling', 'running', 'hiking', 'strength', 'yoga', 'swimming'].map(s => `
+            <label style="display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; cursor: pointer;">
+              <input type="checkbox" name="sport" value="${s}" ${sports.includes(s) ? 'checked' : ''} style="cursor: pointer;" />
+              <span style="text-transform: capitalize;">${s}</span>
+            </label>
+          `).join('')}
+        </div>
+        
+        <label style="display: block; margin-bottom: 8px; font-weight: 600;">Weekly Hours Target</label>
+        <input
+          type="number"
+          id="weeklyHoursInput"
+          value="${weeklyHours}"
+          min="1"
+          max="50"
+          step="0.5"
+          style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); margin-bottom: 16px;"
+        />
+        
+        <label style="display: block; margin-bottom: 8px; font-weight: 600;">Goals & Focus Areas</label>
+        <textarea
+          id="goalsInput"
+          placeholder="e.g., Build endurance for summer crits, improve climbing power"
+          style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); min-height: 80px; resize: vertical; margin-bottom: 16px; font-family: inherit;"
+        >${goals}</textarea>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+          <div>
+            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Height (cm)</label>
+            <input
+              type="number"
+              id="heightInput"
+              value="${heightCm}"
+              placeholder="175"
+              min="100"
+              max="250"
+              style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text);"
+            />
+          </div>
+          <div>
+            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Weight (kg)</label>
+            <input
+              type="number"
+              id="weightInput"
+              value="${weightKg}"
+              placeholder="70"
+              min="30"
+              max="200"
+              step="0.1"
+              style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text);"
+            />
+          </div>
+        </div>
+        
+        <button id="savePreferencesBtn" style="width: 100%; padding: 14px; background: var(--accent); color: white; border: none; border-radius: 8px; font-weight: 600; font-size: 16px; cursor: pointer;">
+          Save Preferences
+        </button>
       </div>
     </div>
   `;
@@ -948,9 +1087,16 @@ async function render() {
       const data = await fetchLLMAnalysis();
       app.innerHTML = renderAnalysis(data);
       attachAnalysisHandlers();
+    } else if (r === '/preferences') {
+      // Preferences page
+      const prefs = await fetchPreferences();
+      app.innerHTML = renderPreferences(prefs);
+      attachPreferencesHandlers();
     } else if (r === '/chat') {
       // Chat = conversational interface
-      app.innerHTML = renderChat();
+      const chatHistory = JSON.parse(localStorage.getItem('peakflow_chat_history') || '[]');
+      app.innerHTML = renderChat(chatHistory);
+      attachChatHandlers();
     } else {
       // Default to recovery view for / and /recovery
       const payload = await fetchPayload();
@@ -996,6 +1142,100 @@ function initAuthUi() {
   }
 
   syncAdvancedUi();
+}
+
+function attachPreferencesHandlers() {
+  const saveBtn = document.getElementById('savePreferencesBtn');
+  if (!saveBtn) return;
+  
+  saveBtn.addEventListener('click', async () => {
+    const sportCheckboxes = document.querySelectorAll('input[name="sport"]:checked');
+    const sports = Array.from(sportCheckboxes).map(cb => cb.value);
+    const weeklyHours = parseFloat(document.getElementById('weeklyHoursInput').value);
+    const goals = document.getElementById('goalsInput').value.trim();
+    const heightCm = document.getElementById('heightInput').value ? parseFloat(document.getElementById('heightInput').value) : null;
+    const weightKg = document.getElementById('weightInput').value ? parseFloat(document.getElementById('weightInput').value) : null;
+    
+    const prefs = {
+      sports,
+      weekly_hours: weeklyHours,
+      goals,
+      height_cm: heightCm,
+      weight_kg: weightKg
+    };
+    
+    saveBtn.textContent = 'Saving...';
+    saveBtn.disabled = true;
+    
+    const success = await savePreferences(prefs);
+    
+    if (success) {
+      saveBtn.textContent = 'Saved!';
+      setTimeout(() => {
+        saveBtn.textContent = 'Save Preferences';
+        saveBtn.disabled = false;
+      }, 2000);
+    } else {
+      saveBtn.textContent = 'Failed to save';
+      saveBtn.disabled = false;
+    }
+  });
+}
+
+function attachChatHandlers() {
+  const input = document.getElementById('chatInput');
+  const sendBtn = document.getElementById('chatSendBtn');
+  
+  if (!input || !sendBtn) return;
+  
+  const send = async () => {
+    const message = input.value.trim();
+    if (!message) return;
+    
+    input.disabled = true;
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Sending...';
+    
+    // Get current history
+    const history = JSON.parse(localStorage.getItem('peakflow_chat_history') || '[]');
+    
+    // Add user message
+    history.push({ role: 'user', content: message });
+    localStorage.setItem('peakflow_chat_history', JSON.stringify(history));
+    
+    // Re-render with user message
+    const app = document.getElementById('app');
+    app.innerHTML = renderChat(history);
+    attachChatHandlers();
+    
+    try {
+      // Send to API
+      const response = await sendChatMessage(message);
+      
+      // Add assistant response
+      history.push({ role: 'assistant', content: response });
+      localStorage.setItem('peakflow_chat_history', JSON.stringify(history));
+      
+      // Re-render with response
+      app.innerHTML = renderChat(history);
+      attachChatHandlers();
+      
+      // Scroll to bottom
+      const messagesEl = document.getElementById('chatMessages');
+      if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+      
+    } catch (e) {
+      history.push({ role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' });
+      localStorage.setItem('peakflow_chat_history', JSON.stringify(history));
+      app.innerHTML = renderChat(history);
+      attachChatHandlers();
+    }
+  };
+  
+  sendBtn.addEventListener('click', send);
+  input.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') send();
+  });
 }
 
 window.addEventListener('hashchange', render);

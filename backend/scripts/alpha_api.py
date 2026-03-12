@@ -209,6 +209,11 @@ class AlphaHandler(BaseHTTPRequestHandler):
                             "/api/alpha/llm/explain-workout?sport=cycling&athleteId=default",
                             "/api/alpha/llm/weekly-plan?startDate=2026-03-12&athleteId=default",
                             "/api/alpha/llm/analysis",
+                            "/api/alpha/preferences?athleteId=default",
+                        ],
+                        "post": [
+                            "/api/alpha/preferences",
+                            "/api/alpha/llm/chat",
                         ],
                     },
                 )
@@ -650,6 +655,31 @@ class AlphaHandler(BaseHTTPRequestHandler):
                         "detail": str(e)
                     })
 
+            if path == "/api/alpha/preferences":
+                from peakflow.preferences import get_preferences
+                
+                q = parse_qs(parsed.query)
+                athlete_id = (q.get('athleteId') or ['default'])[0]
+                saved = _get_athlete_state(athlete_id)
+                preferences = get_preferences(saved)
+                
+                # Auto-populate weight from latest Garmin wellness if available
+                if not preferences.get("weight_kg"):
+                    try:
+                        shell = build_alpha_shell_payload(SILVER_DIR, day=None)
+                        if shell:
+                            recovery = shell.get("screens", {}).get("recovery_load", {}).get("recovery", {})
+                            weight_kg = recovery.get("weight_kg")
+                            if weight_kg:
+                                preferences["weight_kg"] = weight_kg
+                    except Exception:
+                        pass
+                
+                return _json(self, HTTPStatus.OK, {
+                    "ok": True,
+                    "preferences": preferences
+                })
+
             return _json(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "not_found"})
 
         # Frontend static routes
@@ -657,8 +687,143 @@ class AlphaHandler(BaseHTTPRequestHandler):
             return
 
         # Simple SPA fallback
-        if path in ["/recovery", "/chat", "/workout", "/plan"] and self._serve_frontend("/"):
+        if path in ["/recovery", "/chat", "/workout", "/plan", "/preferences", "/analysis"] and self._serve_frontend("/"):
             return
+
+        return _text(self, HTTPStatus.NOT_FOUND, "Not found")
+
+    def do_POST(self) -> None:
+        """Handle POST requests."""
+        if ALPHA_TOKEN and not self._check_auth():
+            return
+
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        # API routes
+        if path.startswith("/api/"):
+            
+            if path == "/api/alpha/preferences":
+                from peakflow.preferences import validate_preferences
+                
+                try:
+                    # Parse request body
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    body = self.rfile.read(content_length).decode('utf-8')
+                    data = json.loads(body)
+                    
+                    athlete_id = data.get('athleteId', 'default')
+                    preferences_update = data.get('preferences', {})
+                    
+                    # Validate preferences
+                    validated = validate_preferences(preferences_update)
+                    
+                    # Load current state
+                    state = _load_planner_state()
+                    if athlete_id not in state.get("athletes", {}):
+                        state.setdefault("athletes", {})[athlete_id] = {}
+                    
+                    # Merge with existing preferences
+                    current_prefs = state["athletes"][athlete_id].get("preferences", {})
+                    updated_prefs = {**current_prefs, **validated}
+                    state["athletes"][athlete_id]["preferences"] = updated_prefs
+                    
+                    # Save state
+                    _save_planner_state(state)
+                    
+                    return _json(self, HTTPStatus.OK, {
+                        "ok": True,
+                        "preferences": updated_prefs
+                    })
+                    
+                except Exception as e:
+                    return _json(self, HTTPStatus.BAD_REQUEST, {
+                        "ok": False,
+                        "error": "invalid_preferences",
+                        "detail": str(e)
+                    })
+            
+            if path == "/api/alpha/llm/chat":
+                try:
+                    # Parse request body
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    body = self.rfile.read(content_length).decode('utf-8')
+                    data = json.loads(body)
+                    
+                    athlete_id = data.get('athleteId', 'default')
+                    user_message = data.get('message', '').strip()
+                    
+                    if not user_message:
+                        return _json(self, HTTPStatus.BAD_REQUEST, {
+                            "ok": False,
+                            "error": "empty_message"
+                        })
+                    
+                    # Load chat history
+                    state = _load_planner_state()
+                    athlete_data = state.get("athletes", {}).get(athlete_id, {})
+                    chat_history = athlete_data.get("chat_history", [])
+                    
+                    # Load context for chat
+                    from peakflow.preferences import get_preferences
+                    
+                    saved = _get_athlete_state(athlete_id)
+                    preferences = get_preferences(saved)
+                    shell = build_alpha_shell_payload(SILVER_DIR, day=None)
+                    
+                    recovery_raw = {}
+                    load_raw = {}
+                    if shell:
+                        recovery_raw = shell.get("screens", {}).get("recovery_load", {}).get("recovery", {})
+                        load_raw = shell.get("screens", {}).get("recovery_load", {}).get("load", {})
+                    
+                    # Get recent activities
+                    try:
+                        icu = IntervalsClient.from_env()
+                        newest = date.today().isoformat()
+                        oldest = (date.today() - timedelta(days=7)).isoformat()
+                        recent_activities = icu.activities(oldest, newest)
+                    except Exception:
+                        recent_activities = []
+                    
+                    # Generate response with LLM
+                    llm = LLMClient()
+                    response = llm.chat(
+                        message=user_message,
+                        history=chat_history,
+                        preferences=preferences,
+                        recovery=recovery_raw,
+                        load=load_raw,
+                        recent_workouts=recent_activities
+                    )
+                    
+                    # Update chat history
+                    chat_history.append({"role": "user", "content": user_message})
+                    chat_history.append({"role": "assistant", "content": response})
+                    
+                    # Keep last 20 messages (10 exchanges)
+                    if len(chat_history) > 20:
+                        chat_history = chat_history[-20:]
+                    
+                    # Save chat history
+                    if athlete_id not in state.get("athletes", {}):
+                        state.setdefault("athletes", {})[athlete_id] = {}
+                    state["athletes"][athlete_id]["chat_history"] = chat_history
+                    _save_planner_state(state)
+                    
+                    return _json(self, HTTPStatus.OK, {
+                        "ok": True,
+                        "response": response
+                    })
+                    
+                except Exception as e:
+                    return _json(self, HTTPStatus.INTERNAL_SERVER_ERROR, {
+                        "ok": False,
+                        "error": "chat_failed",
+                        "detail": str(e)
+                    })
+            
+            return _json(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "not_found"})
 
         return _text(self, HTTPStatus.NOT_FOUND, "Not found")
 

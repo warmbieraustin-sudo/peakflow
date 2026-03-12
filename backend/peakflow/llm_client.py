@@ -602,3 +602,145 @@ class LLMClient:
             debrief=debrief,
             today_focus=today_focus
         )
+    
+    def chat(
+        self,
+        message: str,
+        history: list[Dict[str, str]],
+        preferences: Dict[str, Any],
+        recovery: Dict[str, Any],
+        load: Dict[str, Any],
+        recent_workouts: list[Dict[str, Any]]
+    ) -> str:
+        """
+        Conversational chat interface with full context.
+        Supports training questions AND app navigation help.
+        
+        Args:
+            message: User's message
+            history: Chat history (list of {role, content} dicts)
+            preferences: Athlete preferences
+            recovery: Current recovery metrics
+            load: Current training load
+            recent_workouts: Recent workout history
+        
+        Returns:
+            Assistant response
+        """
+        # Build context
+        context_parts = ["**Athlete Context:**"]
+        
+        # Preferences
+        if preferences:
+            sports = preferences.get("sports", [])
+            weekly_hours = preferences.get("weekly_hours")
+            goals = preferences.get("goals")
+            weight = preferences.get("weight_kg")
+            
+            if sports:
+                context_parts.append(f"- Sports: {', '.join(sports)}")
+            if weekly_hours:
+                context_parts.append(f"- Weekly hours target: {weekly_hours}")
+            if goals:
+                context_parts.append(f"- Goals: {goals}")
+            if weight:
+                context_parts.append(f"- Current weight: {weight}kg")
+        
+        # Recovery
+        if recovery:
+            sleep = recovery.get("sleep_score")
+            hrv = recovery.get("hrv")
+            rhr = recovery.get("resting_hr")
+            
+            if sleep:
+                context_parts.append(f"- Sleep: {sleep}/100")
+            if hrv:
+                context_parts.append(f"- HRV: {hrv}ms")
+            if rhr:
+                context_parts.append(f"- Resting HR: {rhr}bpm")
+        
+        # Load
+        if load:
+            ctl = load.get("ctl")
+            atl = load.get("atl")
+            tsb = load.get("tsb")
+            
+            if ctl:
+                context_parts.append(f"- Fitness (CTL): {ctl:.1f}")
+            if atl:
+                context_parts.append(f"- Fatigue (ATL): {atl:.1f}")
+            if tsb:
+                context_parts.append(f"- Form (TSB): {tsb:.1f}")
+        
+        # Recent workouts (last 3)
+        if recent_workouts:
+            context_parts.append(f"\n**Recent workouts ({len(recent_workouts[:3])} shown):**")
+            for w in recent_workouts[:3]:
+                sport = w.get("type", "workout")
+                duration_sec = w.get("moving_time", 0)
+                duration_min = duration_sec / 60
+                context_parts.append(f"- {sport}: {duration_min:.0f}min")
+        
+        # System prompt
+        system_prompt = """You are a helpful AI training assistant for PeakFlow.
+
+Your role:
+1. Answer questions about training, recovery, performance, and planning
+2. Help users understand and navigate the PeakFlow app
+3. Explain training metrics (TSS, CTL, ATL, TSB, power zones, etc.)
+4. Provide coaching guidance based on available data
+5. Help with app features (how to use preferences, view plans, track progress)
+
+Guidelines:
+- Be conversational and encouraging
+- Cite specific data when giving advice
+- Explain technical terms if user seems unsure
+- If asked about app features, provide clear navigation instructions
+- Always prioritize athlete safety and sustainable training
+- If you don't have enough data, say so clearly
+
+For app help questions:
+- Preferences: Set sports, goals, and weekly hours targets
+- Recovery: View sleep, HRV, and readiness metrics
+- Today's Workout: See daily recommendation and workout details
+- 7-Day Plan: View training horizon and intensity pattern
+- Analysis: Review 14-day performance and recovery trends
+- Chat: This page! Ask questions anytime"""
+
+        # Construct messages
+        messages = []
+        
+        # Add context as first user message if history is empty
+        if not history:
+            messages.append({
+                "role": "user",
+                "content": "\n".join(context_parts)
+            })
+            messages.append({
+                "role": "assistant",
+                "content": "Got it! I have your current context. How can I help you today?"
+            })
+        
+        # Add history
+        messages.extend(history[-10:])  # Last 10 messages (5 exchanges)
+        
+        # Add current message
+        messages.append({
+            "role": "user",
+            "content": message
+        })
+        
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=500,
+                temperature=0.7,
+                system=system_prompt,
+                messages=messages
+            )
+            
+            return response.content[0].text
+        
+        except Exception as e:
+            print(f"LLM chat failed: {e}")
+            return "I'm having trouble connecting right now. Please try again in a moment."
