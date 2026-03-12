@@ -321,16 +321,22 @@ function buildDailyDebrief(rec, review) {
 
 function renderRecovery(p, review) {
   const r = p.screens.recovery_load || {};
+  const m = p.screens.morning_brief || {};
   const rec = r.recovery || {};
   const load = r.load || {};
   const act = r.activity_summary || {};
   const sleepHours = rec.sleep_seconds ? (rec.sleep_seconds / 3600).toFixed(1) : '—';
   const debrief = buildDailyDebrief(rec, review);
+  const freshStatus = m.headline?.fresh ? '✅ Fresh' : '⚠️ Stale';
+  const freshMins = m.headline?.freshness_age_minutes ?? '—';
 
   return `
     <div class="card">
       <div class="label">Daily Debrief</div>
       <div style="font-size: 16px; line-height: 1.5; color: var(--text-secondary); margin-top: 8px;">${debrief}</div>
+      <div class="muted" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+        Data: ${freshStatus} • Updated ${freshMins} min ago
+      </div>
     </div>
     
     <div class="card">
@@ -672,12 +678,10 @@ async function render() {
       app.innerHTML = renderPlan(modalities, recommendation, horizon);
       attachPlanHandlers();
     } else {
+      // Default to recovery view for / and /recovery
       const payload = await fetchPayload();
-      if (r === '/recovery') {
-        const yesterdayReview = await fetchWorkoutReview(getYesterdayISO());
-        app.innerHTML = renderRecovery(payload, yesterdayReview);
-      } else if (r === '/chat') app.innerHTML = renderChat(payload);
-      else app.innerHTML = renderMorning(payload);
+      const yesterdayReview = await fetchWorkoutReview(getYesterdayISO());
+      app.innerHTML = renderRecovery(payload, yesterdayReview);
     }
   } catch (e) {
     app.innerHTML = `<div class='card'>Error: ${e.message}</div>`;
