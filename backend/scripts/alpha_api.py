@@ -356,13 +356,30 @@ class AlphaHandler(BaseHTTPRequestHandler):
 
             if path == "/api/alpha/llm/explain-workout":
                 try:
+                    from peakflow.llm_cache import LLMCache
+                    
                     q = parse_qs(parsed.query)
                     athlete_id = (q.get('athleteId') or ['default'])[0]
                     sport = (q.get('sport') or ['cycling'])[0]
                     coach_mode_q = (q.get('coachMode') or [None])[0]
                     coach_mode = (coach_mode_q or '').strip().lower() in ('1', 'true', 'yes') if coach_mode_q else False
                     
-                    # Get current state
+                    cache = LLMCache()
+                    
+                    # Check cache first (invalidates on sport or coachMode change)
+                    cached_explanation = cache.get_workout_explanation(
+                        sport=sport,
+                        athlete_id=athlete_id,
+                        coach_mode=coach_mode
+                    )
+                    if cached_explanation:
+                        return _json(self, HTTPStatus.OK, {
+                            "ok": True,
+                            "explanation": cached_explanation,
+                            "cached": True
+                        })
+                    
+                    # Generate new explanation
                     saved = _get_athlete_state(athlete_id)
                     athlete_feedback = saved.get('athlete_feedback')
                     
@@ -386,9 +403,18 @@ class AlphaHandler(BaseHTTPRequestHandler):
                         recent_feedback=athlete_feedback
                     )
                     
+                    # Cache the result
+                    cache.set_workout_explanation(
+                        explanation=explanation,
+                        sport=sport,
+                        athlete_id=athlete_id,
+                        coach_mode=coach_mode
+                    )
+                    
                     return _json(self, HTTPStatus.OK, {
                         "ok": True,
-                        "explanation": explanation
+                        "explanation": explanation,
+                        "cached": False
                     })
                     
                 except Exception as e:
@@ -400,7 +426,21 @@ class AlphaHandler(BaseHTTPRequestHandler):
 
             if path == "/api/alpha/llm/debrief/today":
                 try:
-                    # Get today's shell payload for recovery data
+                    from peakflow.llm_cache import LLMCache
+                    
+                    cache = LLMCache()
+                    today = date.today().isoformat()
+                    
+                    # Check cache first
+                    cached_debrief = cache.get_debrief(today)
+                    if cached_debrief:
+                        return _json(self, HTTPStatus.OK, {
+                            "ok": True,
+                            "debrief": cached_debrief,
+                            "cached": True
+                        })
+                    
+                    # Generate new debrief
                     shell = build_alpha_shell_payload(SILVER_DIR, day=None)
                     if not shell:
                         return _json(self, HTTPStatus.NOT_FOUND, {"ok": False, "error": "no_recovery_data"})
@@ -423,9 +463,13 @@ class AlphaHandler(BaseHTTPRequestHandler):
                         load=load_raw
                     )
                     
+                    # Cache the result
+                    debrief_dict = debrief.model_dump()
+                    cache.set_debrief(debrief_dict, today)
+                    
                     return _json(self, HTTPStatus.OK, {
                         "ok": True,
-                        "debrief": debrief.model_dump(),
+                        "debrief": debrief_dict,
                         "cached": False
                     })
                     
