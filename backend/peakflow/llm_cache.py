@@ -146,3 +146,79 @@ class LLMCache:
                 json.dump(data, f, indent=2)
         except Exception as e:
             print(f"Failed to cache explanation: {e}")
+    
+    def get_horizon(
+        self,
+        sport: str,
+        focus_sport: Optional[str],
+        coach_mode: bool,
+        athlete_id: str = "default"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get cached horizon plan.
+        
+        Args:
+            sport: Primary sport
+            focus_sport: Focus sport (optional)
+            coach_mode: Coach mode enabled
+            athlete_id: Athlete ID
+        
+        Returns:
+            Cached horizon or None if stale/missing
+        """
+        today = datetime.now().isoformat()[:10]
+        focus = focus_sport or "none"
+        key = f"{athlete_id}_{sport}_{focus}_{coach_mode}_{today}"
+        cache_file = self._cache_file("horizon", key)
+        
+        if not cache_file.exists():
+            return None
+        
+        try:
+            with open(cache_file, 'r') as f:
+                data = json.load(f)
+            
+            # Check if cached for today
+            cached_date = data.get("date", "")[:10]
+            if cached_date != today:
+                return None
+            
+            # Check if params changed
+            if (data.get("sport") != sport or 
+                data.get("focus_sport") != focus_sport or 
+                data.get("coach_mode") != coach_mode):
+                return None
+            
+            return data.get("horizon")
+        except Exception:
+            return None
+    
+    def set_horizon(
+        self,
+        horizon: Dict[str, Any],
+        sport: str,
+        focus_sport: Optional[str],
+        coach_mode: bool,
+        athlete_id: str = "default"
+    ) -> None:
+        """Cache horizon plan."""
+        today = datetime.now().isoformat()[:10]
+        focus = focus_sport or "none"
+        key = f"{athlete_id}_{sport}_{focus}_{coach_mode}_{today}"
+        cache_file = self._cache_file("horizon", key)
+        
+        data = {
+            "date": today,
+            "sport": sport,
+            "focus_sport": focus_sport,
+            "coach_mode": coach_mode,
+            "athlete_id": athlete_id,
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "horizon": horizon
+        }
+        
+        try:
+            with open(cache_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"Failed to cache horizon: {e}")

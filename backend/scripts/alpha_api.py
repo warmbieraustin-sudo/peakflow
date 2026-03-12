@@ -328,6 +328,8 @@ class AlphaHandler(BaseHTTPRequestHandler):
                 return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
 
             if path == "/api/alpha/planner/horizon":
+                from peakflow.llm_cache import LLMCache
+                
                 q = parse_qs(parsed.query)
                 day = (q.get("day") or [None])[0]
                 athlete_id = (q.get("athleteId") or ["default"])[0]
@@ -340,7 +342,24 @@ class AlphaHandler(BaseHTTPRequestHandler):
                     if coach_mode_q is not None
                     else bool(saved.get("coach_mode", False))
                 )
+                
+                # Check cache first (only if no specific day requested)
+                cache = LLMCache()
+                if not day:
+                    cached_horizon = cache.get_horizon(
+                        sport=sport,
+                        focus_sport=focus_sport,
+                        coach_mode=coach_mode,
+                        athlete_id=athlete_id
+                    )
+                    if cached_horizon:
+                        return _json(self, HTTPStatus.OK, {
+                            "ok": True,
+                            "payload": cached_horizon,
+                            "cached": True
+                        })
 
+                # Generate new horizon
                 shell = build_alpha_shell_payload(SILVER_DIR, day=day)
                 icu = IntervalsClient.from_env()
                 newest = date.today().isoformat()
@@ -352,7 +371,22 @@ class AlphaHandler(BaseHTTPRequestHandler):
                 else:
                     payload = build_horizon_plan(shell, sport, focus_sport=focus_sport, recent_activities=recent_activities)
                 payload["athlete_id"] = athlete_id
-                return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
+                
+                # Cache the result (only if no specific day requested)
+                if not day:
+                    cache.set_horizon(
+                        horizon=payload,
+                        sport=sport,
+                        focus_sport=focus_sport,
+                        coach_mode=coach_mode,
+                        athlete_id=athlete_id
+                    )
+                
+                return _json(self, HTTPStatus.OK, {
+                    "ok": True,
+                    "payload": payload,
+                    "cached": False
+                })
 
             if path == "/api/alpha/llm/explain-workout":
                 try:
