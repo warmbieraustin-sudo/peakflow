@@ -598,6 +598,7 @@ function renderWorkout(w) {
 
 function renderPlan(horizon) {
   const weekDays = (horizon?.days || []).slice(0, 7);
+  const coachMode = horizon?.coach_mode || false;
   
   const dayCards = weekDays.map(d => {
     const intensityColor = 
@@ -605,12 +606,53 @@ function renderPlan(horizon) {
       d.intensity_band === 'moderate' ? '#10b981' :
       d.intensity_band === 'hard' ? '#ef4444' : '#6b7690';
     
+    // Get workout title (from TP if available, else generated)
+    const workoutTitle = d.plan?.title || d.planned_workout?.title || `${d.sport_type} session`;
+    const workoutBlocks = d.plan?.blocks || d.planned_workout?.blocks || [];
+    
+    // Calculate total duration from blocks
+    let totalDuration = 0;
+    if (workoutBlocks.length > 0) {
+      totalDuration = workoutBlocks.reduce((sum, b) => {
+        const mins = b.duration_minutes || (b.duration_sec ? Math.round(b.duration_sec / 60) : 0);
+        return sum + mins;
+      }, 0);
+    }
+    const duration = d.plan?.duration_minutes || totalDuration || null;
+    const source = d.plan_source || (coachMode ? 'trainingpeaks' : 'generated');
+    
+    // Render workout blocks if available
+    let blocksHtml = '';
+    if (workoutBlocks.length > 0) {
+      blocksHtml = workoutBlocks.map(b => {
+        const blockColor = getBlockColor(b);
+        const blockDuration = b.duration_minutes || (b.duration_sec ? Math.round(b.duration_sec / 60) : 0);
+        const hasTargets = b.target_low != null && b.target_high != null;
+        const targetDisplay = hasTargets 
+          ? `${b.target_low}-${b.target_high}% ${formatTargetType(b.target_type)}`
+          : b.target_low != null 
+            ? `${b.target_low}% ${formatTargetType(b.target_type)}`
+            : 'Easy effort';
+        
+        return `
+          <div style="display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px;">
+            <div style="width: 3px; height: 20px; background: ${blockColor}; border-radius: 2px;"></div>
+            <div style="flex: 1;">
+              <span style="font-weight: 500;">${b.label || 'Interval'}:</span>
+              <span class="muted">${blockDuration}min • ${targetDisplay}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+    
     return `
       <div class="card" style="padding: 16px;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-          <div>
+          <div style="flex: 1;">
             <div class="label">${new Date(d.date).toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric'})}</div>
-            <div class="value" style="font-size: 14px; margin-top: 4px;">${d.sport_type}</div>
+            <div class="value" style="font-size: 14px; margin-top: 4px;">${workoutTitle}</div>
+            ${duration ? `<div class="muted" style="font-size: 12px; margin-top: 2px;">${duration} min</div>` : ''}
           </div>
           <div style="
             background: ${intensityColor};
@@ -622,7 +664,17 @@ function renderPlan(horizon) {
             text-transform: capitalize;
           ">${d.intensity_band}</div>
         </div>
-        <div class="muted" style="font-size: 12px;">${d.firm ? '📌 Firm' : '💭 Soft'}</div>
+        
+        ${blocksHtml ? `
+          <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border, #1a1f2e);">
+            ${blocksHtml}
+          </div>
+        ` : ''}
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 11px;">
+          <span class="muted">${source === 'trainingpeaks' ? '📋 TrainingPeaks' : source === 'generated' ? '🤖 AI Generated' : '💭 Planned'}</span>
+          <span class="muted">${d.firm ? '📌 Firm' : '💭 Soft'}</span>
+        </div>
       </div>
     `;
   }).join('');
