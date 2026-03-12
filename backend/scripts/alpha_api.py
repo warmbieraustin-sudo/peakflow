@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlparse
 from peakflow.pwa_contract import build_alpha_shell_payload
 from peakflow.workout_review import build_latest_workout_review
 from peakflow.intervals import IntervalsClient
-from peakflow.planner import SUPPORTED_SPORTS, build_daily_recommendation, build_horizon_plan
+from peakflow.planner import SUPPORTED_SPORTS, build_coach_mode_recommendation, build_daily_recommendation, build_horizon_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT.parent / "frontend"
@@ -116,6 +116,7 @@ class AlphaHandler(BaseHTTPRequestHandler):
                             "/api/alpha/workout/latest",
                             "/api/alpha/planner/modalities",
                             "/api/alpha/planner/recommendation?sport=cycling",
+                            "/api/alpha/planner/recommendation?sport=cycling&coachMode=true",
                             "/api/alpha/planner/horizon?sport=cycling&focusSport=cycling",
                         ],
                     },
@@ -152,18 +153,29 @@ class AlphaHandler(BaseHTTPRequestHandler):
                 focus_sport = (q.get("focusSport") or [None])[0]
                 feedback_day = (q.get("feedbackDay") or [None])[0]
                 athlete_feedback = (q.get("athleteFeedback") or [None])[0]
+                coach_mode = ((q.get("coachMode") or ["false"])[0]).strip().lower() in ("1", "true", "yes", "on")
                 if not feedback_day:
                     feedback_day = (date.today() - timedelta(days=1)).isoformat()
 
                 shell = build_alpha_shell_payload(SILVER_DIR, day=day)
                 review = build_latest_workout_review(day=feedback_day)
-                payload = build_daily_recommendation(
-                    shell,
-                    sport,
-                    focus_sport=focus_sport,
-                    last_review=review,
-                    athlete_feedback=athlete_feedback,
-                )
+                if coach_mode:
+                    payload = build_coach_mode_recommendation(
+                        shell,
+                        sport,
+                        focus_sport=focus_sport,
+                        last_review=review,
+                        athlete_feedback=athlete_feedback,
+                        day=day,
+                    )
+                else:
+                    payload = build_daily_recommendation(
+                        shell,
+                        sport,
+                        focus_sport=focus_sport,
+                        last_review=review,
+                        athlete_feedback=athlete_feedback,
+                    )
                 return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
 
             if path == "/api/alpha/planner/horizon":

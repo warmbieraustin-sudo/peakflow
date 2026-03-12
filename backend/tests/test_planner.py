@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import unittest
 
+from unittest.mock import patch
+
 from peakflow.planner import (
     SUPPORTED_SPORTS,
+    build_coach_mode_recommendation,
     build_daily_recommendation,
     build_horizon_plan,
     decide_phase,
@@ -101,6 +104,38 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(horizon["horizon"]["soft_days"], 28)
         self.assertEqual(len(horizon["days"]), 28)
         self.assertTrue(all("plan" in d for d in horizon["days"]))
+
+    @patch("peakflow.planner._tp_workouts_via_script")
+    def test_coach_mode_tp_first(self, mock_tp):
+        mock_tp.return_value = [
+            {
+                "workoutId": 123,
+                "title": "Coach Endurance Ride",
+                "workoutTypeValueId": 2,
+                "description": "Stay easy",
+                "tssPlanned": 45,
+                "structure": {
+                    "structure": [
+                        {
+                            "steps": [
+                                {
+                                    "name": "Active",
+                                    "length": {"unit": "second", "value": 1800},
+                                    "targets": [{"minValue": 60, "maxValue": 70}],
+                                }
+                            ]
+                        }
+                    ]
+                },
+            }
+        ]
+
+        rec = build_coach_mode_recommendation({}, "cycling", focus_sport="cycling", day="2026-03-12")
+        self.assertTrue(rec["coach_mode"])
+        self.assertEqual(rec["plan_source"], "trainingpeaks")
+        self.assertTrue(rec["non_destructive_overlay"])
+        self.assertEqual((rec["plan"] or {}).get("title"), "Coach Endurance Ride")
+        self.assertIn("peakflow_overlay", rec)
 
 
 if __name__ == "__main__":

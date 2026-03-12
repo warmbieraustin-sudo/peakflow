@@ -34,6 +34,7 @@ async function fetchWorkoutReview() {
 const SPORT_KEY = 'peakflow_selected_sport';
 const FOCUS_SPORT_KEY = 'peakflow_focus_sport';
 const ATHLETE_FEEDBACK_KEY = 'peakflow_athlete_feedback';
+const COACH_MODE_KEY = 'peakflow_coach_mode';
 
 function getSelectedSport() {
   return localStorage.getItem(SPORT_KEY) || 'cycling';
@@ -60,15 +61,24 @@ function setAthleteFeedback(v) {
   else localStorage.setItem(ATHLETE_FEEDBACK_KEY, v);
 }
 
+function getCoachMode() {
+  return localStorage.getItem(COACH_MODE_KEY) === '1';
+}
+
+function setCoachMode(on) {
+  localStorage.setItem(COACH_MODE_KEY, on ? '1' : '0');
+}
+
 async function fetchModalities() {
   const r = await apiGet('/api/alpha/planner/modalities');
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.modalities || [];
 }
 
-async function fetchPlanRecommendation(sport, focusSport, athleteFeedback) {
+async function fetchPlanRecommendation(sport, focusSport, athleteFeedback, coachMode) {
   const qs = new URLSearchParams({ sport: sport || 'cycling', focusSport: focusSport || '' });
   if (athleteFeedback) qs.set('athleteFeedback', athleteFeedback);
+  if (coachMode) qs.set('coachMode', 'true');
   const r = await apiGet(`/api/alpha/planner/recommendation?${qs.toString()}`);
   if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
   return r.body.payload;
@@ -204,12 +214,16 @@ function renderPlan(modalities, recommendation, horizon) {
     .join('');
 
   const fb = getAthleteFeedback();
+  const coachMode = getCoachMode();
 
   return `
     <div class="card">
       <div class="label">Today's Activity</div>
       <select id="sportSelect">${options}</select>
       <button id="applySportBtn">Apply</button>
+      <div style="margin-top:8px;">
+        <label class="muted"><input id="coachModeToggle" type="checkbox" ${coachMode ? 'checked' : ''}/> Coach Mode (TP-first)</label>
+      </div>
       <div style="margin-top:8px;">
         <span class="muted">How did yesterday feel?</span>
         <button id="fbEasyBtn" ${fb === 'easy' ? 'disabled' : ''}>Too Easy</button>
@@ -218,6 +232,7 @@ function renderPlan(modalities, recommendation, horizon) {
       </div>
       <div class="muted">Mode: ${recommendation.athlete_mode} • Intensity: ${recommendation.intensity_band} • Next: ${recommendation.next_action}</div>
       <div class="muted">Reason: ${recommendation.modification_reason}</div>
+      <div class="muted">Plan Source: ${recommendation.plan_source || 'peakflow'}</div>
     </div>
     <div class="card">
       <div class="label">Recommended Session</div>
@@ -236,12 +251,19 @@ function renderPlan(modalities, recommendation, horizon) {
 function attachPlanHandlers() {
   const select = document.getElementById('sportSelect');
   const btn = document.getElementById('applySportBtn');
+  const coachToggle = document.getElementById('coachModeToggle');
   const fbEasy = document.getElementById('fbEasyBtn');
   const fbOk = document.getElementById('fbOkBtn');
   const fbHard = document.getElementById('fbHardBtn');
   if (select && btn) {
     btn.addEventListener('click', async () => {
       setSelectedSport(select.value);
+      await render();
+    });
+  }
+  if (coachToggle) {
+    coachToggle.addEventListener('change', async () => {
+      setCoachMode(coachToggle.checked);
       await render();
     });
   }
@@ -277,9 +299,10 @@ async function render() {
       const selected = getSelectedSport();
       const focus = getFocusSport();
       const athleteFeedback = getAthleteFeedback();
+      const coachMode = getCoachMode();
       const [modalities, recommendation, horizon] = await Promise.all([
         fetchModalities(),
-        fetchPlanRecommendation(selected, focus, athleteFeedback),
+        fetchPlanRecommendation(selected, focus, athleteFeedback, coachMode),
         fetchPlanHorizon(selected, focus),
       ]);
       app.innerHTML = renderPlan(modalities, recommendation, horizon);

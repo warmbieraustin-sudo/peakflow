@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 SUPPORTED_SPORTS: List[str] = [
@@ -100,6 +103,119 @@ def _templates_for_sport(sport: str, intensity: str) -> Dict[str, Any]:
         "blocks": [
             {"label": "steady", "duration_sec": 3600, "target_type": "rpe", "target_low": 4, "target_high": 6},
         ],
+    }
+
+
+def _tp_workouts_via_script(day: str) -> List[Dict[str, Any]]:
+    tp_script = Path.home() / ".openclaw" / "workspace" / "skills" / "trainingpeaks" / "scripts" / "tp.py"
+    cmd = ["/opt/homebrew/bin/python3", str(tp_script), "workouts", day, day, "--json"]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        raise RuntimeError(f"tp.py failed: {r.stderr.strip()}")
+    out = json.loads(r.stdout)
+    if isinstance(out, list):
+        return out
+    if isinstance(out, dict):
+        return out.get("workouts", [])
+    return []
+
+
+def _tp_workout_to_plan(workout: Dict[str, Any], fallback_sport: str) -> Dict[str, Any]:
+    sport = "cycling" if workout.get("workoutTypeValueId") in (2, None) else fallback_sport
+    structure = (workout.get("structure") or {}).get("structure") or []
+    blocks: List[Dict[str, Any]] = []
+    for item in structure:
+        for step in item.get("steps", []):
+            length = step.get("length") or {}
+            dur = length.get("value") if length.get("unit") == "second" else None
+            target = (step.get("targets") or [{}])[0]
+            blocks.append(
+                {
+                    "label": step.get("name") or "step",
+                    "duration_sec": dur or 300,
+                    "target_type": "power_pct_ftp",
+                    "target_low": target.get("minValue"),
+                    "target_high": target.get("maxValue"),
+                }
+            )
+
+    if not blocks:
+        # fallback from totalTimePlanned (hours) if no structure
+        total_hours = workout.get("totalTimePlanned") or 1.0
+        blocks = [
+            {
+                "label": "coach_prescribed",
+                "duration_sec": int(float(total_hours) * 3600),
+                "target_type": "rpe",
+                "target_low": 4,
+                "target_high": 6,
+            }
+        ]
+
+    return {
+        "schema_version": "v1-modality-agnostic",
+        "sport_type": sport,
+        "title": workout.get("title") or "Coach Prescribed Workout",
+        "blocks": blocks,
+        "source": "trainingpeaks_coach",
+        "coach_meta": {
+            "workout_id": workout.get("workoutId"),
+            "planned_tss": workout.get("tssPlanned"),
+            "description": workout.get("description"),
+        },
+    }
+
+
+def build_coach_mode_recommendation(
+    shell_payload: Dict[str, Any] | None,
+    selected_sport: str,
+    focus_sport: str | None = None,
+    last_review: Dict[str, Any] | None = None,
+    athlete_feedback: str | None = None,
+    day: str | None = None,
+) -> Dict[str, Any]:
+    target_day = day or date.today().isoformat()
+    overlay = build_daily_recommendation(
+        shell_payload,
+        selected_sport,
+        focus_sport=focus_sport,
+        last_review=last_review,
+        athlete_feedback=athlete_feedback,
+    )
+
+    tp_plan = None
+    tp_error = None
+    try:
+        workouts = _tp_workouts_via_script(target_day)
+        if workouts:
+            tp_plan = _tp_workout_to_plan(workouts[0], overlay.get("selected_sport") or selected_sport)
+    except Exception as exc:
+        tp_error = str(exc)
+
+    prescribed = tp_plan or overlay.get("plan")
+    valid, reject_reasons = validate_plan_schema(prescribed)
+
+    return {
+        **overlay,
+        "coach_mode": True,
+        "non_destructive_overlay": True,
+        "plan_source": "trainingpeaks" if tp_plan else "peakflow_fallback",
+        "prescribed_plan": prescribed,
+        "peakflow_overlay": {
+            "intensity_band": overlay.get("intensity_band"),
+            "next_action": overlay.get("next_action"),
+            "modification_reason": overlay.get("modification_reason"),
+        },
+        "plan": prescribed,
+        "plan_validation": {
+            "valid": valid,
+            "reject_reasons": reject_reasons,
+        },
+        "coach_meta": {
+            "tp_day": target_day,
+            "tp_available": bool(tp_plan),
+            "tp_error": tp_error,
+        },
     }
 
 
