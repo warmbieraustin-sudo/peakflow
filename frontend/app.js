@@ -223,13 +223,15 @@ function formatDuration(seconds) {
 function renderWorkoutGraph(blocks) {
   if (!blocks || blocks.length === 0) return '';
   
-  const maxDuration = Math.max(...blocks.map(b => b.duration_sec || 0));
-  if (maxDuration === 0) return '';
+  const totalDuration = blocks.reduce((sum, b) => sum + (b.duration_sec || 0), 0);
+  if (totalDuration === 0) return '';
   
   const maxHeightPx = 64; // max bar height in pixels
+  const maxDuration = Math.max(...blocks.map(b => b.duration_sec || 0));
   
   const bars = blocks.map(b => {
     const heightPx = Math.round(((b.duration_sec || 0) / maxDuration) * maxHeightPx);
+    const widthPct = ((b.duration_sec || 0) / totalDuration) * 100;
     const color = getBlockColor(b);
     const targetRange = b.target_low && b.target_high 
       ? `${b.target_low}-${b.target_high}%`
@@ -237,7 +239,7 @@ function renderWorkoutGraph(blocks) {
     
     return `
       <div style="
-        flex: 1;
+        flex: ${widthPct};
         display: flex;
         flex-direction: column;
         justify-content: flex-end;
@@ -286,10 +288,15 @@ function renderWorkoutBlocks(blocks) {
   
   return blocks.map(b => {
     const duration = formatDuration(b.duration_sec);
-    const hasTargets = b.target_low != null && b.target_high != null;
-    const targetDisplay = hasTargets 
-      ? `${b.target_low}-${b.target_high}% ${formatTargetType(b.target_type)}`
-      : 'Easy effort';
+    
+    // Build target display
+    let targetDisplay = 'Easy effort';
+    if (b.target_low != null && b.target_high != null) {
+      targetDisplay = `${b.target_low}-${b.target_high}% ${formatTargetType(b.target_type)}`;
+    } else if (b.target_low != null) {
+      targetDisplay = `${b.target_low}% ${formatTargetType(b.target_type)}`;
+    }
+    
     const color = getBlockColor(b);
     
     return `

@@ -187,6 +187,33 @@ def _group_tp_by_day(workouts: List[Dict[str, Any]]) -> Dict[str, List[Dict[str,
     return out
 
 
+def _infer_intensity_from_blocks(blocks: list[Dict[str, Any]]) -> str:
+    """Infer workout intensity from power/HR targets in blocks."""
+    if not blocks:
+        return "moderate"
+    
+    # Get main work blocks (skip warmup/cooldown)
+    work_blocks = [b for b in blocks if 'active' in b.get('label', '').lower() or 'work' in b.get('label', '').lower()]
+    if not work_blocks:
+        work_blocks = blocks  # fallback to all blocks
+    
+    # Check power targets
+    for block in work_blocks:
+        target_type = block.get('target_type', '')
+        if 'power_pct_ftp' in target_type:
+            low = block.get('target_low', 0)
+            high = block.get('target_high', low)
+            avg = (low + high) / 2 if high else low
+            
+            if avg < 65:
+                return "easy"
+            elif avg < 85:
+                return "moderate"
+            else:
+                return "hard"
+    
+    return "moderate"  # default
+
 def build_coach_mode_recommendation(
     shell_payload: Dict[str, Any] | None,
     selected_sport: str,
@@ -215,6 +242,11 @@ def build_coach_mode_recommendation(
 
     prescribed = tp_plan or overlay.get("plan")
     valid, reject_reasons = validate_plan_schema(prescribed)
+    
+    # Infer intensity from TP workout if available
+    tp_intensity = None
+    if tp_plan and prescribed.get('blocks'):
+        tp_intensity = _infer_intensity_from_blocks(prescribed['blocks'])
 
     coach_explanation = {
         "summary": "TP remains source-of-truth. PeakFlow overlay is advisory only.",
@@ -226,12 +258,16 @@ def build_coach_mode_recommendation(
         "recommended_overlay": {
             "next_action": overlay.get("next_action"),
             "modification_reason": overlay.get("modification_reason"),
-            "intensity_band": overlay.get("intensity_band"),
+            "intensity_band": tp_intensity or overlay.get("intensity_band"),
         },
     }
 
+    # Use TP-inferred intensity in coach mode, fallback to overlay
+    final_intensity = tp_intensity or overlay.get("intensity_band")
+    
     return {
         **overlay,
+        "intensity_band": final_intensity,  # override with TP-inferred intensity
         "coach_mode": True,
         "non_destructive_overlay": True,
         "plan_source": "trainingpeaks" if tp_plan else "peakflow_fallback",
