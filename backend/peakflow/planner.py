@@ -633,9 +633,16 @@ def build_horizon_plan(
 
     start = date.today()
     days: List[Dict[str, Any]] = []
+    
+    # For day 0 (today), use same logic as build_daily_recommendation to ensure consistency
+    quick_load = morning.get("quick_load") or {}
+    daily_load = quick_load.get("daily_training_load")
+    today_intensity = _pick_intensity_band(fresh, daily_load)
+    
     for i in range(28):
         d = start + timedelta(days=i)
-        intensity = pattern[i % 7]
+        # Day 0 uses today's recovery-based intensity; rest of week follows pattern
+        intensity = today_intensity if i == 0 else pattern[i % 7]
         # honor explicit activity selection on day0; default to focus sport cadence later
         day_sport = sport if i == 0 else (focus_sport or sport)
 
