@@ -7,3 +7,7 @@ main { padding: 16px; }
 .value { font-size: 18px; font-weight: 600; }
 .row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 pre { white-space: pre-wrap; }
+.muted { color: #94a3b8; font-size: 12px; }
+.auth-bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid #1e293b; }
+.auth-bar input { background: #0b1220; border: 1px solid #1f2937; color: #e2e8f0; border-radius: 8px; padding: 6px 8px; min-width: 280px; }
+.auth-bar button { background: #1d4ed8; color: #fff; border: none; border-radius: 8px; padding: 6px 10px; cursor: pointer; }

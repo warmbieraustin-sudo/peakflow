@@ -1,8 +1,28 @@
+const TOKEN_KEY = 'peakflow_alpha_token';
+
+function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || '';
+}
+
+function setToken(token) {
+  if (!token) localStorage.removeItem(TOKEN_KEY);
+  else localStorage.setItem(TOKEN_KEY, token.trim());
+}
+
+async function apiGet(path) {
+  const token = getToken();
+  const headers = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(path, { headers });
+  const body = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, body };
+}
+
 async function fetchPayload() {
-  const res = await fetch('/api/alpha/shell/today');
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'fetch failed');
-  return data.payload;
+  const r = await apiGet('/api/alpha/shell/today');
+  if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
+  return r.body.payload;
 }
 
 function card(label, value) {
@@ -29,9 +49,7 @@ function renderMorning(p) {
 
 function renderRecovery(p) {
   const r = p.screens.recovery_load;
-  return `
-    <div class="card"><pre>${JSON.stringify(r, null, 2)}</pre></div>
-  `;
+  return `<div class="card"><pre>${JSON.stringify(r, null, 2)}</pre></div>`;
 }
 
 function renderChat(p) {
@@ -41,6 +59,18 @@ function renderChat(p) {
 
 function routeName() {
   return (location.hash || '#/').replace('#', '');
+}
+
+function setAuthStatus(text) {
+  const el = document.getElementById('authStatus');
+  if (el) el.textContent = text;
+}
+
+async function refreshAuthStatus() {
+  const r = await apiGet('/api/health');
+  if (r.ok) setAuthStatus(`Auth: connected (${getToken() ? 'token set' : 'open'})`);
+  else if (r.status === 401) setAuthStatus('Auth: unauthorized (set token)');
+  else setAuthStatus(`Auth: error (${r.status})`);
 }
 
 async function render() {
@@ -54,7 +84,28 @@ async function render() {
   } catch (e) {
     app.innerHTML = `<div class='card'>Error: ${e.message}</div>`;
   }
+  await refreshAuthStatus();
+}
+
+function initAuthUi() {
+  const tokenInput = document.getElementById('tokenInput');
+  const saveBtn = document.getElementById('saveTokenBtn');
+  const clearBtn = document.getElementById('clearTokenBtn');
+
+  tokenInput.value = getToken();
+
+  saveBtn.addEventListener('click', async () => {
+    setToken(tokenInput.value);
+    await render();
+  });
+
+  clearBtn.addEventListener('click', async () => {
+    setToken('');
+    tokenInput.value = '';
+    await render();
+  });
 }
 
 window.addEventListener('hashchange', render);
+initAuthUi();
 render();

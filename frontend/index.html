@@ -16,6 +16,14 @@
       </nav>
     </header>
 
+    <section class="auth-bar">
+      <label for="tokenInput">Alpha Token</label>
+      <input id="tokenInput" type="password" placeholder="Optional (if API auth enabled)" />
+      <button id="saveTokenBtn">Save</button>
+      <button id="clearTokenBtn">Clear</button>
+      <span id="authStatus" class="muted">Auth: unknown</span>
+    </section>
+
     <main id="app">Loading…</main>
 
     <script src="/app.js"></script>

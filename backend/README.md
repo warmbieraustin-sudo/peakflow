@@ -113,10 +113,10 @@ PYTHONPATH=. python3 scripts/pwa_payload.py --write
 
 Contract doc: `backend/docs/ALPHA_UI_CONTRACT.md`
 
-## Alpha API + shell routes (Day 15)
+## Alpha API + shell routes (Day 15/16)
 ```bash
 cd backend
-PYTHONPATH=. python3 scripts/alpha_api.py
+./scripts/run_alpha.sh
 ```
 
 Default endpoints:
@@ -124,6 +124,18 @@ Default endpoints:
 - `GET /api/alpha/routes`
 - `GET /api/alpha/shell/today`
 - `GET /api/alpha/shell/YYYY-MM-DD`
+
+Auth:
+- set `PEAKFLOW_ALPHA_TOKEN` to require `Authorization: Bearer <token>`
+- token can be entered in the alpha shell auth bar and is stored in localStorage
+
+API smoke test:
+```bash
+cd backend
+./scripts/smoke_api.py
+# token mode
+./scripts/smoke_api.py --token "your-alpha-token"
+```
 
 Frontend route skeleton (served by same process):
 - `/` (Morning Brief)
