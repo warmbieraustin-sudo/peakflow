@@ -272,14 +272,24 @@ function renderWorkoutGraph(blocks) {
   `;
 }
 
+function formatTargetType(targetType) {
+  if (!targetType) return '';
+  if (targetType === 'power_pct_ftp') return 'FTP';
+  if (targetType === 'hr_pct_max') return 'HR Max';
+  if (targetType === 'power_watts') return 'Watts';
+  if (targetType === 'hr_bpm') return 'BPM';
+  return targetType.replace(/_/g, ' ');
+}
+
 function renderWorkoutBlocks(blocks) {
   if (!blocks || blocks.length === 0) return '';
   
   return blocks.map(b => {
     const duration = formatDuration(b.duration_sec);
-    const target = b.target_low && b.target_high
-      ? `${b.target_low}-${b.target_high}%`
-      : '—';
+    const hasTargets = b.target_low != null && b.target_high != null;
+    const targetDisplay = hasTargets 
+      ? `${b.target_low}-${b.target_high}% ${formatTargetType(b.target_type)}`
+      : 'Easy effort';
     const color = getBlockColor(b);
     
     return `
@@ -299,7 +309,7 @@ function renderWorkoutBlocks(blocks) {
         <div style="flex: 1;">
           <div style="font-weight: 600; font-size: 14px;">${b.label}</div>
           <div class="muted" style="font-size: 12px;">
-            ${duration} • ${b.target_type.replace('_', ' ')} ${target}
+            ${duration} • ${targetDisplay}
           </div>
         </div>
       </div>
@@ -439,7 +449,18 @@ function renderTodayWorkout(modalities, recommendation, llmExplanation) {
 
     <div class="card">
       <div class="label">Recommended Session</div>
-      <div class="value" style="margin-bottom: 12px;">${recommendation.plan?.title || '—'}</div>
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        <div class="value">${recommendation.plan?.title || '—'}</div>
+        <div style="
+          background: ${recommendation.intensity_band === 'easy' ? '#4a9eff' : recommendation.intensity_band === 'moderate' ? '#10b981' : '#ef4444'};
+          color: white;
+          padding: 4px 12px;
+          border-radius: 12px;
+          font-size: 12px;
+          font-weight: 600;
+          text-transform: capitalize;
+        ">${recommendation.intensity_band || 'moderate'}</div>
+      </div>
       ${advanced ? `<div class="muted" style="margin-bottom: 8px;">sport: ${recommendation.plan?.sport_type || '—'} • schema: ${recommendation.plan?.schema_version || '—'}</div>` : ''}
       ${workoutBlocks.length > 0 ? `${workoutGraph}<div style="margin-top: 8px;">${workoutDetails}</div>` : '<div class="muted">No interval structure available</div>'}
     </div>
