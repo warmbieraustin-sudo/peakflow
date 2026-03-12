@@ -99,8 +99,31 @@ def _parse_tp_structure(tp_workout: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _latest_activity(activities: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    Select primary activity from a day's activities.
+    For multiple activities, prioritize by training load (highest stimulus).
+    """
     if not activities:
         return None
+    
+    # If only one activity, return it
+    if len(activities) == 1:
+        return activities[0]
+    
+    # Multiple activities: pick the one with highest training load
+    # This identifies the "main" workout of the day
+    activities_with_load = [a for a in activities if a.get("icu_training_load")]
+    
+    if activities_with_load:
+        # Sort by training load descending, return highest
+        return sorted(activities_with_load, key=lambda a: a.get("icu_training_load", 0), reverse=True)[0]
+    
+    # Fallback: longest duration
+    activities_with_time = [a for a in activities if a.get("moving_time")]
+    if activities_with_time:
+        return sorted(activities_with_time, key=lambda a: a.get("moving_time", 0), reverse=True)[0]
+    
+    # Last resort: most recent by start time
     activities = sorted(activities, key=lambda a: a.get("start_date_local") or "")
     return activities[-1]
 
@@ -409,23 +432,75 @@ def evaluate_plan_execution(plan: Dict[str, Any], execution_activity: Optional[D
 
 
 def _infer_intensity(activity: Dict[str, Any]) -> str:
-    """Infer workout intensity from power/pace data when not provided by source."""
+    """
+    Infer workout intensity from sport-specific metrics.
+    Supports: cycling (power/FTP), running (pace), swimming (pace), strength (load), yoga (easy).
+    """
     
-    # Prefer weighted average power (normalized power proxy) over simple average
-    avg_watts = activity.get("icu_weighted_avg_watts") or activity.get("average_watts")
-    ftp = activity.get("icu_ftp") or activity.get("icu_pm_ftp_watts")
+    sport_type = (activity.get("type") or "").lower()
     
-    # For cycling: use power/FTP
-    if avg_watts and ftp and ftp > 0:
-        pct_ftp = (avg_watts / ftp) * 100
-        if pct_ftp < 65:
-            return "easy"
-        elif pct_ftp < 85:
-            return "moderate"
-        else:
-            return "hard"
+    # Yoga/stretching/flexibility = always easy
+    if sport_type in ("yoga", "stretching", "flexibility"):
+        return "easy"
     
-    # Fallback: use training load if available
+    # Cycling/VirtualRide: use power/FTP
+    if sport_type in ("ride", "virtualride", "cycling"):
+        avg_watts = activity.get("icu_weighted_avg_watts") or activity.get("average_watts")
+        ftp = activity.get("icu_ftp") or activity.get("icu_pm_ftp_watts")
+        
+        if avg_watts and ftp and ftp > 0:
+            pct_ftp = (avg_watts / ftp) * 100
+            if pct_ftp < 65:
+                return "easy"
+            elif pct_ftp < 85:
+                return "moderate"
+            else:
+                return "hard"
+    
+    # Running/VirtualRun: use pace vs threshold (if available)
+    if sport_type in ("run", "virtualrun", "running"):
+        avg_pace = activity.get("average_speed")  # m/s
+        threshold_pace = activity.get("icu_run_threshold_pace")  # m/s
+        
+        if avg_pace and threshold_pace and threshold_pace > 0:
+            # Slower pace = easier (inverse of power)
+            pace_ratio = threshold_pace / avg_pace
+            if pace_ratio < 0.75:  # significantly slower than threshold
+                return "easy"
+            elif pace_ratio < 0.95:  # near threshold
+                return "moderate"
+            else:  # at or above threshold
+                return "hard"
+    
+    # Swimming: use pace vs threshold (if available)
+    if sport_type in ("swim", "swimming"):
+        avg_pace = activity.get("average_speed")  # m/s
+        threshold_pace = activity.get("icu_swim_threshold_pace")  # m/s
+        
+        if avg_pace and threshold_pace and threshold_pace > 0:
+            pace_ratio = threshold_pace / avg_pace
+            if pace_ratio < 0.80:
+                return "easy"
+            elif pace_ratio < 0.95:
+                return "moderate"
+            else:
+                return "hard"
+    
+    # Strength/WeightTraining/Workout: use training load per hour
+    if sport_type in ("workout", "weighttraining", "strength", "crossfit"):
+        training_load = activity.get("icu_training_load")
+        moving_time = activity.get("moving_time")
+        
+        if training_load and moving_time and moving_time > 0:
+            load_per_hour = (training_load / moving_time) * 3600
+            if load_per_hour < 40:  # lower threshold for strength
+                return "easy"
+            elif load_per_hour < 70:
+                return "moderate"
+            else:
+                return "hard"
+    
+    # Universal fallback: use training load per hour
     training_load = activity.get("icu_training_load")
     moving_time = activity.get("moving_time")
     if training_load and moving_time and moving_time > 0:
@@ -437,7 +512,7 @@ def _infer_intensity(activity: Dict[str, Any]) -> str:
         else:
             return "hard"
     
-    # Default fallback
+    # Last resort default
     return "moderate"
 
 
@@ -482,6 +557,8 @@ def build_latest_workout_review(day: str | None = None) -> Dict[str, Any]:
         "source": "intervals.icu",
         "status": "ok" if latest else "empty",
         "activity": None,
+        "multiple_activities": len(activities) > 1,
+        "total_activities": len(activities),
     }
     streams: List[Dict[str, Any]] = []
 

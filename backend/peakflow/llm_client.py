@@ -364,11 +364,17 @@ class LLMClient:
   "weekly_notes": "<week-level coaching summary>"
 }''')
         
-        prompt_parts.append("\nGuidelines:")
-        prompt_parts.append("- Mix intensities (80/20 polarized: 80% easy, 20% hard)")
-        prompt_parts.append("- Include at least 1 rest/active recovery day")
-        prompt_parts.append("- Match sport-specific target types (power for cycling, pace for running, effort for yoga/hiking)")
-        prompt_parts.append("- Total weekly volume should match athlete's available hours")
+        prompt_parts.append("\n**IMPORTANT Guidelines:**")
+        prompt_parts.append("1. **Multi-sport athletes:** If multiple sports listed, use plan_type='mixed_modality' and vary sports across the week")
+        prompt_parts.append("2. **Single-sport athletes:** If only one sport listed, use plan_type='single_sport' and set primary_sport")
+        prompt_parts.append("3. **Polarized training:** 80% easy, 20% hard (include at least 1-2 easy recovery days)")
+        prompt_parts.append("4. **Sport-specific targets:**")
+        prompt_parts.append("   - Cycling/VirtualRide: target_type='power_pct_ftp', targets in % FTP")
+        prompt_parts.append("   - Running: target_type='pace', targets in min/mile or min/km")
+        prompt_parts.append("   - Strength/Yoga: target_type='effort', targets as perceived effort (1-10)")
+        prompt_parts.append("   - Swimming: target_type='pace', targets in min/100m")
+        prompt_parts.append("5. **Weekly volume:** Total weekly minutes should match athlete's weekly_hours × 60")
+        prompt_parts.append("6. **Rest days:** Include at least 1 complete rest day (duration_minutes=0, empty blocks[])")
         
         return "\n".join(prompt_parts)
     
@@ -383,18 +389,25 @@ class LLMClient:
         
         start = datetime.fromisoformat(start_date)
         primary_sport = athlete_preferences.get('primary_sport', 'cycling')
+        sports = athlete_preferences.get('sports', [primary_sport])
+        is_multi_sport = len(sports) > 1
         
         # Simple 7-day pattern: easy, moderate, easy, hard, easy, moderate, rest
         pattern = ['easy', 'moderate', 'easy', 'hard', 'easy', 'moderate', 'rest']
         
+        # For multi-sport, rotate through sports
+        sport_rotation = sports if is_multi_sport else [primary_sport]
+        
         workouts = {}
+        sport_idx = 0
+        
         for i in range(7):
             day = (start + timedelta(days=i)).isoformat()
             intensity = pattern[i]
             
             if intensity == 'rest':
                 workouts[day] = DailyWorkout(
-                    sport_type=primary_sport,
+                    sport_type=sport_rotation[0],
                     title="Rest Day",
                     duration_minutes=0,
                     intensity="easy",
@@ -402,19 +415,41 @@ class LLMClient:
                     coach_notes="Recovery day"
                 )
             else:
+                sport = sport_rotation[sport_idx % len(sport_rotation)]
+                sport_idx += 1
+                
                 duration = 90 if intensity == 'hard' else 60
+                
+                # Sport-specific target types
+                if sport in ('cycling', 'ride', 'virtualride'):
+                    target_type = "power_pct_ftp"
+                    target_low = 40 if intensity == 'easy' else 70
+                    target_high = 60 if intensity == 'easy' else 85
+                elif sport in ('running', 'run', 'virtualrun'):
+                    target_type = "pace"
+                    target_low = None
+                    target_high = None
+                elif sport in ('yoga', 'stretching', 'strength', 'workout'):
+                    target_type = "effort"
+                    target_low = 3 if intensity == 'easy' else 7
+                    target_high = 5 if intensity == 'easy' else 9
+                else:
+                    target_type = "effort"
+                    target_low = None
+                    target_high = None
+                
                 workouts[day] = DailyWorkout(
-                    sport_type=primary_sport,
-                    title=f"{intensity.capitalize()} {primary_sport}",
+                    sport_type=sport,
+                    title=f"{intensity.capitalize()} {sport}",
                     duration_minutes=duration,
                     intensity=intensity,
                     blocks=[
                         WorkoutBlock(
                             label="Main",
                             duration_minutes=duration,
-                            target_low=40 if intensity == 'easy' else 70,
-                            target_high=60 if intensity == 'easy' else 85,
-                            target_type="power_pct_ftp" if primary_sport == 'cycling' else "effort",
+                            target_low=target_low,
+                            target_high=target_high,
+                            target_type=target_type,
                             description=f"{duration}min {intensity} effort"
                         )
                     ],
@@ -422,10 +457,10 @@ class LLMClient:
                 )
         
         return WeeklyPlan(
-            plan_type="single_sport",
-            primary_sport=primary_sport,
+            plan_type="mixed_modality" if is_multi_sport else "single_sport",
+            primary_sport=primary_sport if not is_multi_sport else None,
             workouts=workouts,
-            weekly_notes="Polarized training plan with mixed intensities"
+            weekly_notes="Mixed-sport training plan with polarized intensity distribution" if is_multi_sport else "Polarized training plan with mixed intensities"
         )
     
     def generate_analysis_insights(
