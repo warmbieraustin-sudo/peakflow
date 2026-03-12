@@ -499,6 +499,8 @@ def build_daily_recommendation(
     focus_sport: str | None = None,
     last_review: Dict[str, Any] | None = None,
     athlete_feedback: str | None = None,
+    preferences: Dict[str, Any] | None = None,
+    horizon: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     sport = (selected_sport or "cycling").strip().lower()
     if sport not in SUPPORTED_SPORTS:
@@ -532,6 +534,28 @@ def build_daily_recommendation(
     if not valid:
         fallback_plan = _fallback_plan(sport)
 
+    # Get tomorrow's context from horizon if available
+    tomorrow_context = None
+    if horizon and horizon.get("days"):
+        days = horizon.get("days", [])
+        if len(days) > 1:
+            tomorrow = days[1]
+            tomorrow_context = {
+                "date": tomorrow.get("date"),
+                "intensity": tomorrow.get("intensity_band"),
+                "sport": tomorrow.get("sport_type"),
+                "title": tomorrow.get("plan", {}).get("title")
+            }
+    
+    # Extract relevant preferences
+    pref_context = None
+    if preferences:
+        pref_context = {
+            "sports": preferences.get("sports", []),
+            "weekly_hours": preferences.get("weekly_hours"),
+            "goals": preferences.get("goals")
+        }
+    
     return {
         "selected_sport": sport,
         "athlete_mode": athlete_mode,
@@ -540,6 +564,8 @@ def build_daily_recommendation(
             "fresh": fresh,
             "daily_training_load": daily_load,
             "focus_sport": focus,
+            "tomorrow": tomorrow_context,
+            "preferences": pref_context,
         },
         "plan": plan if valid else fallback_plan,
         "plan_validation": {
@@ -619,6 +645,7 @@ def build_horizon_plan(
     selected_sport: str,
     focus_sport: str | None = None,
     recent_activities: List[Dict[str, Any]] | None = None,
+    preferences: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     sport = (selected_sport or "cycling").strip().lower()
     if sport not in SUPPORTED_SPORTS:

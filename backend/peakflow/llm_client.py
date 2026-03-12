@@ -190,6 +190,21 @@ class LLMClient:
         intensity = recommendation.get('intensity_band', 'moderate')
         prompt_parts.append(f"**Workout:** {workout_title} ({intensity} intensity)")
         
+        # Tomorrow's context (if available)
+        why = recommendation.get('why', {})
+        tomorrow = why.get('tomorrow')
+        if tomorrow:
+            tomorrow_intensity = tomorrow.get('intensity', 'unknown')
+            tomorrow_title = tomorrow.get('title', 'workout')
+            prompt_parts.append(f"**Tomorrow:** {tomorrow_title} ({tomorrow_intensity} intensity)")
+        
+        # Preferences context (if available)
+        prefs = why.get('preferences')
+        if prefs:
+            goals = prefs.get('goals')
+            if goals:
+                prompt_parts.append(f"**Goals:** {goals}")
+        
         # Recovery context
         if 'sleep_score' in recovery:
             prompt_parts.append(f"**Recovery:** Sleep {recovery['sleep_score']}/100")

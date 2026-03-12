@@ -323,12 +323,32 @@ class AlphaHandler(BaseHTTPRequestHandler):
                         day=day,
                     )
                 else:
+                    # Get preferences
+                    from peakflow.preferences import get_preferences
+                    prefs = get_preferences(saved)
+                    
+                    # Build horizon to get tomorrow's context
+                    icu = IntervalsClient.from_env()
+                    newest = date.today().isoformat()
+                    oldest = (date.today() - timedelta(days=35)).isoformat()
+                    recent_activities = icu.activities(oldest, newest)
+                    
+                    horizon_data = build_horizon_plan(
+                        shell,
+                        sport,
+                        focus_sport=focus_sport,
+                        recent_activities=recent_activities,
+                        preferences=prefs
+                    )
+                    
                     payload = build_daily_recommendation(
                         shell,
                         sport,
                         focus_sport=focus_sport,
                         last_review=review,
                         athlete_feedback=athlete_feedback,
+                        preferences=prefs,
+                        horizon=horizon_data,
                     )
                 payload["athlete_id"] = athlete_id
                 return _json(self, HTTPStatus.OK, {"ok": True, "payload": payload})
@@ -366,6 +386,9 @@ class AlphaHandler(BaseHTTPRequestHandler):
                         })
 
                 # Generate new horizon
+                from peakflow.preferences import get_preferences
+                prefs = get_preferences(saved)
+                
                 shell = build_alpha_shell_payload(SILVER_DIR, day=day)
                 icu = IntervalsClient.from_env()
                 newest = date.today().isoformat()
@@ -375,8 +398,9 @@ class AlphaHandler(BaseHTTPRequestHandler):
                 if coach_mode:
                     payload = build_coach_mode_horizon(shell, sport, focus_sport=focus_sport, recent_activities=recent_activities, start_day=day)
                 else:
-                    payload = build_horizon_plan(shell, sport, focus_sport=focus_sport, recent_activities=recent_activities)
+                    payload = build_horizon_plan(shell, sport, focus_sport=focus_sport, recent_activities=recent_activities, preferences=prefs)
                 payload["athlete_id"] = athlete_id
+                payload["preferences"] = prefs  # Include preferences in response for UI
                 
                 # Cache the result (only if no specific day requested)
                 if not day:
@@ -861,6 +885,53 @@ class AlphaHandler(BaseHTTPRequestHandler):
                         load=load_raw,
                         recent_workouts=recent_activities
                     )
+                    
+                    # Detect preference changes in user message
+                    preferences_updated = False
+                    user_lower = user_message.lower()
+                    
+                    # Detect sport preferences
+                    if any(word in user_lower for word in ["i do", "i train", "i prefer", "i like", "add"]):
+                        sports_mentioned = []
+                        for sport in ["cycling", "running", "swimming", "hiking", "strength", "yoga", "skiing"]:
+                            if sport in user_lower:
+                                sports_mentioned.append(sport)
+                        
+                        if sports_mentioned and "sports" in preferences:
+                            # Merge with existing sports
+                            current_sports = set(preferences.get("sports", []))
+                            current_sports.update(sports_mentioned)
+                            preferences["sports"] = list(current_sports)
+                            preferences_updated = True
+                    
+                    # Detect weekly hours
+                    import re
+                    hours_match = re.search(r'(\d+)\s*(?:hours?|hrs?)\s*(?:per|a|each)?\s*week', user_lower)
+                    if hours_match:
+                        preferences["weekly_hours"] = float(hours_match.group(1))
+                        preferences_updated = True
+                    
+                    # Detect goals
+                    if any(phrase in user_lower for phrase in ["my goal", "i want to", "training for", "preparing for"]):
+                        # Extract the goal phrase
+                        for phrase in ["my goal is", "i want to", "training for", "preparing for"]:
+                            if phrase in user_lower:
+                                goal_start = user_lower.find(phrase) + len(phrase)
+                                goal_text = user_message[goal_start:].strip().split('.')[0]
+                                if goal_text and len(goal_text) > 5:
+                                    preferences["goals"] = goal_text
+                                    preferences_updated = True
+                                break
+                    
+                    # Save updated preferences if detected
+                    if preferences_updated:
+                        from peakflow.preferences import validate_preferences
+                        validated = validate_preferences(preferences)
+                        if athlete_id not in state.get("athletes", {}):
+                            state.setdefault("athletes", {})[athlete_id] = {}
+                        current_prefs = state["athletes"][athlete_id].get("preferences", {})
+                        updated_prefs = {**current_prefs, **validated}
+                        state["athletes"][athlete_id]["preferences"] = updated_prefs
                     
                     # Update chat history
                     chat_history.append({"role": "user", "content": user_message})
