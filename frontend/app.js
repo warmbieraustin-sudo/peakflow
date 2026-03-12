@@ -895,12 +895,34 @@ function renderPreferences(prefs = {}) {
   const goals = prefs.goals || '';
   const heightCm = prefs.height_cm || '';
   const weightKg = prefs.weight_kg || '';
+  const units = prefs.units || 'imperial';
+  
+  // Convert for display if imperial
+  const heightDisplay = units === 'imperial' && heightCm ? (heightCm / 2.54).toFixed(1) : heightCm;
+  const weightDisplay = units === 'imperial' && weightKg ? (weightKg * 2.20462).toFixed(1) : weightKg;
+  
+  const heightLabel = units === 'imperial' ? 'Height (in)' : 'Height (cm)';
+  const weightLabel = units === 'imperial' ? 'Weight (lbs)' : 'Weight (kg)';
+  const heightPlaceholder = units === 'imperial' ? '69' : '175';
+  const weightPlaceholder = units === 'imperial' ? '154' : '70';
   
   return `
     <div class="card">
       <div class="label">Your Preferences</div>
       
       <div style="margin-top: 20px;">
+        <label style="display: block; margin-bottom: 8px; font-weight: 600;">Units</label>
+        <div style="display: flex; gap: 12px; margin-bottom: 20px;">
+          <label style="display: flex; align-items: center; gap: 6px; padding: 10px 16px; background: ${units === 'imperial' ? 'var(--accent)' : 'var(--card)'}; color: ${units === 'imperial' ? 'white' : 'var(--text)'}; border: 1px solid ${units === 'imperial' ? 'var(--accent)' : 'var(--border)'}; border-radius: 8px; cursor: pointer;">
+            <input type="radio" name="units" value="imperial" ${units === 'imperial' ? 'checked' : ''} style="cursor: pointer;" />
+            <span>Imperial (lbs, in)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 6px; padding: 10px 16px; background: ${units === 'metric' ? 'var(--accent)' : 'var(--card)'}; color: ${units === 'metric' ? 'white' : 'var(--text)'}; border: 1px solid ${units === 'metric' ? 'var(--accent)' : 'var(--border)'}; border-radius: 8px; cursor: pointer;">
+            <input type="radio" name="units" value="metric" ${units === 'metric' ? 'checked' : ''} style="cursor: pointer;" />
+            <span>Metric (kg, cm)</span>
+          </label>
+        </div>
+        
         <label style="display: block; margin-bottom: 8px; font-weight: 600;">Sports</label>
         <div style="display: flex; flex-wrap: gap; gap: 8px; margin-bottom: 16px;">
           ${['cycling', 'running', 'hiking', 'strength', 'yoga', 'swimming'].map(s => `
@@ -931,26 +953,27 @@ function renderPreferences(prefs = {}) {
         
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
           <div>
-            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Height (cm)</label>
+            <label style="display: block; margin-bottom: 8px; font-weight: 600;">${heightLabel}</label>
             <input
               type="number"
               id="heightInput"
-              value="${heightCm}"
-              placeholder="175"
-              min="100"
-              max="250"
+              value="${heightDisplay}"
+              placeholder="${heightPlaceholder}"
+              min="${units === 'imperial' ? '39' : '100'}"
+              max="${units === 'imperial' ? '98' : '250'}"
+              step="${units === 'imperial' ? '0.5' : '1'}"
               style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text);"
             />
           </div>
           <div>
-            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Weight (kg)</label>
+            <label style="display: block; margin-bottom: 8px; font-weight: 600;">${weightLabel}</label>
             <input
               type="number"
               id="weightInput"
-              value="${weightKg}"
-              placeholder="70"
-              min="30"
-              max="200"
+              value="${weightDisplay}"
+              placeholder="${weightPlaceholder}"
+              min="${units === 'imperial' ? '66' : '30'}"
+              max="${units === 'imperial' ? '440' : '200'}"
               step="0.1"
               style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text);"
             />
@@ -1146,6 +1169,18 @@ function initAuthUi() {
 
 function attachPreferencesHandlers() {
   const saveBtn = document.getElementById('savePreferencesBtn');
+  const unitsRadios = document.querySelectorAll('input[name="units"]');
+  
+  // Re-render when units change to update labels/values
+  unitsRadios.forEach(radio => {
+    radio.addEventListener('change', async () => {
+      const prefs = await fetchPreferences();
+      const app = document.getElementById('app');
+      app.innerHTML = renderPreferences(prefs);
+      attachPreferencesHandlers();
+    });
+  });
+  
   if (!saveBtn) return;
   
   saveBtn.addEventListener('click', async () => {
@@ -1153,15 +1188,32 @@ function attachPreferencesHandlers() {
     const sports = Array.from(sportCheckboxes).map(cb => cb.value);
     const weeklyHours = parseFloat(document.getElementById('weeklyHoursInput').value);
     const goals = document.getElementById('goalsInput').value.trim();
-    const heightCm = document.getElementById('heightInput').value ? parseFloat(document.getElementById('heightInput').value) : null;
-    const weightKg = document.getElementById('weightInput').value ? parseFloat(document.getElementById('weightInput').value) : null;
+    const units = document.querySelector('input[name="units"]:checked').value;
+    
+    // Get height/weight values (convert to metric if imperial)
+    let heightCm = null;
+    let weightKg = null;
+    
+    const heightInput = document.getElementById('heightInput').value;
+    const weightInput = document.getElementById('weightInput').value;
+    
+    if (heightInput) {
+      const heightValue = parseFloat(heightInput);
+      heightCm = units === 'imperial' ? heightValue * 2.54 : heightValue;
+    }
+    
+    if (weightInput) {
+      const weightValue = parseFloat(weightInput);
+      weightKg = units === 'imperial' ? weightValue / 2.20462 : weightValue;
+    }
     
     const prefs = {
       sports,
       weekly_hours: weeklyHours,
       goals,
       height_cm: heightCm,
-      weight_kg: weightKg
+      weight_kg: weightKg,
+      units
     };
     
     saveBtn.textContent = 'Saving...';

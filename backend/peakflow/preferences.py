@@ -10,6 +10,7 @@ DEFAULT_PREFERENCES = {
     "goals": "",  # Free-text goals/focus areas
     "height_cm": None,  # Height in cm (optional)
     "weight_kg": None,  # Current weight in kg (optional, auto-populated from Garmin)
+    "units": "imperial",  # Display units: "imperial" or "metric"
 }
 
 
@@ -77,5 +78,11 @@ def validate_preferences(prefs: Dict[str, Any]) -> Dict[str, Any]:
                 validated["weight_kg"] = weight
         except (ValueError, TypeError):
             pass
+    
+    # Units preference
+    if "units" in prefs:
+        units = str(prefs["units"]).strip().lower()
+        if units in ("imperial", "metric"):
+            validated["units"] = units
     
     return validated
