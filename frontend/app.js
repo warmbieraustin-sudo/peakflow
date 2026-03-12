@@ -611,19 +611,20 @@ function renderPlan(horizon) {
       d.intensity_band === 'moderate' ? '#10b981' :
       d.intensity_band === 'hard' ? '#ef4444' : '#6b7690';
     
+    // Parse date correctly (YYYY-MM-DD as local date, not UTC)
+    const dateParts = d.date.split('-');
+    const localDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+    
     // Get workout title (from TP if available, else generated)
     const workoutTitle = d.plan?.title || d.planned_workout?.title || `${d.sport_type} session`;
     const workoutBlocks = d.plan?.blocks || d.planned_workout?.blocks || [];
     
-    // Calculate total duration from blocks
-    let totalDuration = 0;
-    if (workoutBlocks.length > 0) {
-      totalDuration = workoutBlocks.reduce((sum, b) => {
-        const mins = b.duration_minutes || (b.duration_sec ? Math.round(b.duration_sec / 60) : 0);
-        return sum + mins;
-      }, 0);
+    // Use duration_hours from plan (authoritative from TP), fallback to blocks
+    let durationHours = d.plan?.duration_hours || null;
+    if (!durationHours && workoutBlocks.length > 0) {
+      const totalSec = workoutBlocks.reduce((sum, b) => sum + (b.duration_sec || 0), 0);
+      durationHours = totalSec / 3600;
     }
-    const duration = d.plan?.duration_minutes || totalDuration || null;
     const source = d.plan_source || (coachMode ? 'trainingpeaks' : 'generated');
     
     // Render workout blocks if available
@@ -655,9 +656,9 @@ function renderPlan(horizon) {
       <div class="card" style="padding: 16px;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
           <div style="flex: 1;">
-            <div class="label">${new Date(d.date).toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric'})}</div>
+            <div class="label">${localDate.toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric'})}</div>
             <div class="value" style="font-size: 14px; margin-top: 4px;">${workoutTitle}</div>
-            ${duration ? `<div class="muted" style="font-size: 12px; margin-top: 2px;">${duration} min</div>` : ''}
+            ${durationHours ? `<div class="muted" style="font-size: 12px; margin-top: 2px;">${durationHours.toFixed(1)}h</div>` : ''}
           </div>
           <div style="
             background: ${intensityColor};

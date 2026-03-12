@@ -156,16 +156,29 @@ def _tp_workout_to_plan(workout: Dict[str, Any], fallback_sport: str) -> Dict[st
             }
         ]
 
+    # Use totalTimePlanned as authoritative duration (TP structure often incomplete)
+    total_hours = workout.get("totalTimePlanned") or 1.0
+    blocks_total_sec = sum(b.get("duration_sec", 0) for b in blocks)
+    
+    # If blocks total is significantly less than planned time, use planned time
+    if blocks_total_sec < (total_hours * 3600 * 0.8):  # Less than 80% of planned
+        # Keep blocks for targets but note duration may be incomplete
+        duration_hours = total_hours
+    else:
+        duration_hours = blocks_total_sec / 3600
+    
     return {
         "schema_version": "v1-modality-agnostic",
         "sport_type": sport,
         "title": workout.get("title") or "Coach Prescribed Workout",
         "blocks": blocks,
+        "duration_hours": duration_hours,
         "source": "trainingpeaks_coach",
         "coach_meta": {
             "workout_id": workout.get("workoutId"),
             "planned_tss": workout.get("tssPlanned"),
             "description": workout.get("description"),
+            "total_time_planned_hours": total_hours,
         },
     }
 
