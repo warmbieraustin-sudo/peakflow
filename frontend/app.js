@@ -209,8 +209,10 @@ function renderWorkoutGraph(blocks) {
   const maxDuration = Math.max(...blocks.map(b => b.duration_sec || 0));
   if (maxDuration === 0) return '';
   
+  const maxHeightPx = 64; // max bar height in pixels
+  
   const bars = blocks.map(b => {
-    const heightPct = ((b.duration_sec || 0) / maxDuration) * 100;
+    const heightPx = Math.round(((b.duration_sec || 0) / maxDuration) * maxHeightPx);
     const color = getBlockColor(b);
     const targetRange = b.target_low && b.target_high 
       ? `${b.target_low}-${b.target_high}%`
@@ -223,15 +225,14 @@ function renderWorkoutGraph(blocks) {
         flex-direction: column;
         justify-content: flex-end;
         align-items: center;
-        height: 100%;
-        min-width: 0;
+        min-width: 8px;
       " title="${b.label}: ${formatDuration(b.duration_sec)} @ ${targetRange}">
         <div style="
           width: 100%;
           background: ${color};
-          height: ${heightPct}%;
+          height: ${heightPx}px;
           border-radius: 4px 4px 0 0;
-          transition: opacity 0.2s;
+          min-height: 4px;
         "></div>
       </div>
     `;
@@ -240,12 +241,12 @@ function renderWorkoutGraph(blocks) {
   return `
     <div style="
       display: flex;
-      gap: 4px;
+      gap: 6px;
       width: 100%;
-      height: 80px;
+      height: ${maxHeightPx + 16}px;
       align-items: flex-end;
       padding: 8px;
-      background: rgba(0,0,0,0.2);
+      background: rgba(0,0,0,0.15);
       border-radius: 8px;
       margin-bottom: 16px;
     ">
