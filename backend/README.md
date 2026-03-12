@@ -114,6 +114,7 @@ PYTHONPATH=. python3 scripts/pwa_payload.py --write
 Contract doc: `backend/docs/ALPHA_UI_CONTRACT.md`
 Workout review contract: `backend/docs/WORKOUT_REVIEW_CONTRACT.md` (includes LLM-plan support + tiered matching/confidence)
 Beta onboarding checklist: `backend/docs/BETA_ONBOARDING_CHECKLIST.md`
+Alpha success metrics: `backend/docs/ALPHA_SUCCESS_METRICS.md`
 
 ## Alpha API + shell routes (Day 15/16)
 ```bash
@@ -129,6 +130,8 @@ Default endpoints:
 - `GET /api/alpha/workout/latest?day=YYYY-MM-DD`
 - `GET /api/alpha/planner/modalities`
 - `GET /api/alpha/planner/state?athleteId=default`
+- `GET /api/alpha/planner/feedback/log?athleteId=default&relevance=4&perceived=ok`
+- `GET /api/alpha/planner/feedback/summary`
 - `GET /api/alpha/planner/recommendation?sport=cycling&focusSport=cycling&feedbackDay=YYYY-MM-DD&athleteFeedback=easy|ok|hard&coachMode=true&athleteId=default`
 - `GET /api/alpha/planner/horizon?sport=cycling&focusSport=cycling&coachMode=true&athleteId=default`
 

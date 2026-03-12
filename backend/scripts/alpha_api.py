@@ -28,6 +28,7 @@ ALPHA_TOKEN = os.environ.get("PEAKFLOW_ALPHA_TOKEN", "").strip()
 
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PLANNER_STATE_PATH = ROOT / "data" / "app-state" / "planner_state.json"
+PLANNER_FEEDBACK_LOG = ROOT / "data" / "app-state" / "reco_feedback.jsonl"
 
 
 def _load_planner_state() -> dict:
@@ -56,6 +57,31 @@ def _upsert_athlete_state(athlete_id: str, updates: dict) -> dict:
     row.update({k: v for k, v in updates.items() if v is not None})
     _save_planner_state(state)
     return row
+
+
+def _append_feedback_row(row: dict) -> None:
+    PLANNER_FEEDBACK_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with PLANNER_FEEDBACK_LOG.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+
+
+def _feedback_summary() -> dict:
+    if not PLANNER_FEEDBACK_LOG.exists():
+        return {"count": 0, "avg_relevance": None}
+    rows = []
+    for line in PLANNER_FEEDBACK_LOG.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except Exception:
+            continue
+    rel = [r.get("relevance") for r in rows if isinstance(r.get("relevance"), (int, float))]
+    return {
+        "count": len(rows),
+        "avg_relevance": round(sum(rel) / len(rel), 2) if rel else None,
+    }
 
 
 def _json(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
@@ -151,6 +177,8 @@ class AlphaHandler(BaseHTTPRequestHandler):
                             "/api/alpha/workout/latest",
                             "/api/alpha/planner/modalities",
                             "/api/alpha/planner/state?athleteId=default",
+                            "/api/alpha/planner/feedback/log?athleteId=default&relevance=4",
+                            "/api/alpha/planner/feedback/summary",
                             "/api/alpha/planner/recommendation?sport=cycling",
                             "/api/alpha/planner/recommendation?sport=cycling&coachMode=true",
                             "/api/alpha/planner/horizon?sport=cycling&focusSport=cycling",
@@ -186,6 +214,35 @@ class AlphaHandler(BaseHTTPRequestHandler):
                 q = parse_qs(parsed.query)
                 athlete_id = (q.get("athleteId") or ["default"])[0]
                 return _json(self, HTTPStatus.OK, {"ok": True, "athlete_id": athlete_id, "state": _get_athlete_state(athlete_id)})
+
+            if path == "/api/alpha/planner/feedback/log":
+                q = parse_qs(parsed.query)
+                athlete_id = (q.get("athleteId") or ["default"])[0]
+                relevance_raw = (q.get("relevance") or [None])[0]
+                perceived = (q.get("perceived") or [None])[0]
+                rec_id = (q.get("recId") or [None])[0]
+                note = (q.get("note") or [None])[0]
+
+                relevance = None
+                if relevance_raw is not None:
+                    try:
+                        relevance = int(relevance_raw)
+                    except Exception:
+                        relevance = None
+
+                row = {
+                    "ts": date.today().isoformat(),
+                    "athlete_id": athlete_id,
+                    "relevance": relevance,
+                    "perceived": perceived,
+                    "rec_id": rec_id,
+                    "note": note,
+                }
+                _append_feedback_row(row)
+                return _json(self, HTTPStatus.OK, {"ok": True, "logged": True, "row": row})
+
+            if path == "/api/alpha/planner/feedback/summary":
+                return _json(self, HTTPStatus.OK, {"ok": True, "summary": _feedback_summary()})
 
             if path == "/api/alpha/planner/recommendation":
                 q = parse_qs(parsed.query)

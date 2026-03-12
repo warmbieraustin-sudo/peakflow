@@ -109,6 +109,17 @@ async function fetchPlanHorizon(sport, focusSport, athleteId) {
   return r.body.payload;
 }
 
+async function logRecommendationFeedback({ athleteId, relevance, perceived, recId, note }) {
+  const qs = new URLSearchParams({ athleteId: athleteId || 'default' });
+  if (relevance != null) qs.set('relevance', String(relevance));
+  if (perceived) qs.set('perceived', perceived);
+  if (recId) qs.set('recId', recId);
+  if (note) qs.set('note', note);
+  const r = await apiGet(`/api/alpha/planner/feedback/log?${qs.toString()}`);
+  if (!r.ok) throw new Error(r.body.error || `http_${r.status}`);
+  return r.body;
+}
+
 function card(label, value) {
   return `<div class="card"><div class="label">${label}</div><div class="value">${value ?? '—'}</div></div>`;
 }
@@ -254,12 +265,22 @@ function renderPlan(modalities, recommendation, horizon) {
       <div class="muted">Mode: ${recommendation.athlete_mode} • Intensity: ${recommendation.intensity_band} • Next: ${recommendation.next_action}</div>
       <div class="muted">Reason: ${recommendation.modification_reason}</div>
       <div class="muted">Plan Source: ${recommendation.plan_source || 'peakflow'}</div>
+      <div class="muted">Feedback used: ${recommendation.feedback_summary?.used ? 'yes' : 'no'} • athlete: ${recommendation.feedback_summary?.athlete_feedback || '—'} • score: ${recommendation.feedback_summary?.review_score ?? '—'}</div>
+      <div style="margin-top:8px;">
+        <span class="muted">Recommendation relevance:</span>
+        <button id="rel1Btn">1</button><button id="rel2Btn">2</button><button id="rel3Btn">3</button><button id="rel4Btn">4</button><button id="rel5Btn">5</button>
+      </div>
     </div>
     <div class="card">
       <div class="label">Recommended Session</div>
       <div class="value">${recommendation.plan?.title || '—'}</div>
       <div class="muted">sport: ${recommendation.plan?.sport_type || '—'} • schema: ${recommendation.plan?.schema_version || '—'}</div>
       <ul>${blocks}</ul>
+    </div>
+    <div class="card">
+      <div class="label">Why this changed</div>
+      <div class="muted">${recommendation.coach_explanation?.summary || 'Adaptive recommendation based on load, recovery, and feedback.'}</div>
+      <div class="muted">Overlay: ${recommendation.coach_explanation?.recommended_overlay?.next_action || recommendation.next_action || '—'} (${recommendation.coach_explanation?.recommended_overlay?.modification_reason || recommendation.modification_reason || '—'})</div>
     </div>
     <div class="card">
       <div class="label">7-Day Firm Horizon</div>
@@ -279,6 +300,7 @@ function attachPlanHandlers() {
   const fbEasy = document.getElementById('fbEasyBtn');
   const fbOk = document.getElementById('fbOkBtn');
   const fbHard = document.getElementById('fbHardBtn');
+  const relBtns = [1, 2, 3, 4, 5].map((n) => document.getElementById(`rel${n}Btn`));
   if (athleteInput && athleteBtn) {
     athleteBtn.addEventListener('click', async () => {
       setAthleteId(athleteInput.value || 'default');
@@ -300,6 +322,22 @@ function attachPlanHandlers() {
   if (fbEasy) fbEasy.addEventListener('click', async () => { setAthleteFeedback('easy'); await render(); });
   if (fbOk) fbOk.addEventListener('click', async () => { setAthleteFeedback('ok'); await render(); });
   if (fbHard) fbHard.addEventListener('click', async () => { setAthleteFeedback('hard'); await render(); });
+
+  relBtns.forEach((btn, idx) => {
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      try {
+        await logRecommendationFeedback({
+          athleteId: getAthleteId(),
+          relevance: idx + 1,
+          perceived: getAthleteFeedback() || 'unspecified',
+          recId: `${Date.now()}`,
+        });
+      } catch (_) {
+        // keep UX smooth even if telemetry log fails
+      }
+    });
+  });
 }
 
 function routeName() {
