@@ -1,16 +1,485 @@
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
-header { padding: 14px 16px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-nav { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-nav a { color: #93c5fd; text-decoration: none; }
-main { padding: 16px; }
-.card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
-.label { color: #94a3b8; font-size: 12px; }
-.value { font-size: 18px; font-weight: 600; }
-.row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-pre { white-space: pre-wrap; }
-.muted { color: #94a3b8; font-size: 12px; }
-.auth-bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid #1e293b; flex-wrap: wrap; }
-.auth-bar input, input, select { background: #0b1220; border: 1px solid #1f2937; color: #e2e8f0; border-radius: 8px; padding: 6px 8px; min-width: 180px; }
-button { background: #1d4ed8; color: #fff; border: none; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
-.ghost-btn { background: transparent; border: 1px solid #334155; color: #cbd5e1; }
-.hidden { display: none !important; }
+/* ========================================
+   PeakFlow Alpha - Clean, Calm, Mobile-First UI
+   ======================================== */
+
+:root {
+  /* Colors - Whoop-like palette */
+  --bg-primary: #0a0e1a;
+  --bg-secondary: #0f1420;
+  --bg-card: #141823;
+  --bg-card-hover: #181d29;
+  
+  --border-subtle: #1a1f2e;
+  --border-medium: #252b3d;
+  
+  --text-primary: #e8edf5;
+  --text-secondary: #a0adc4;
+  --text-muted: #6b7690;
+  
+  --accent-primary: #4f9dff;
+  --accent-hover: #6bb0ff;
+  --accent-subtle: #1e3a5f;
+  
+  --success: #34d399;
+  --warning: #fbbf24;
+  --error: #f87171;
+  
+  /* Spacing scale */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  
+  /* Typography */
+  --font-size-xs: 11px;
+  --font-size-sm: 13px;
+  --font-size-base: 15px;
+  --font-size-md: 17px;
+  --font-size-lg: 20px;
+  --font-size-xl: 24px;
+  --font-size-2xl: 32px;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  
+  /* Border radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+}
+
+/* ========================================
+   Base Styles
+   ======================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+  margin: 0;
+  padding: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--font-size-base);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+/* ========================================
+   Header & Navigation
+   ======================================== */
+
+header {
+  padding: var(--space-md);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  backdrop-filter: blur(10px);
+  background: rgba(15, 20, 32, 0.95);
+}
+
+header h1 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+header > div {
+  margin-bottom: var(--space-md);
+}
+
+nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+nav a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+  letter-spacing: 0.01em;
+}
+
+nav a:hover {
+  color: var(--accent-primary);
+  background: var(--accent-subtle);
+}
+
+nav a:active {
+  transform: scale(0.97);
+}
+
+/* ========================================
+   Main Content Area
+   ======================================== */
+
+main {
+  padding: var(--space-lg) var(--space-md);
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+/* ========================================
+   Cards
+   ======================================== */
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  margin-bottom: var(--space-lg);
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  background: var(--bg-card-hover);
+  box-shadow: var(--shadow-md);
+}
+
+.card h2 {
+  margin: 0 0 var(--space-md) 0;
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.card h3 {
+  margin: 0 0 var(--space-sm) 0;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ========================================
+   Label-Value Pairs
+   ======================================== */
+
+.label {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-xs);
+}
+
+.value {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+/* ========================================
+   Grid Layout
+   ======================================== */
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}
+
+/* Nested cards in rows - tighter spacing */
+.row .card {
+  margin-bottom: 0;
+  padding: var(--space-md);
+}
+
+.row .card .label {
+  font-size: var(--font-size-xs);
+}
+
+.row .card .value {
+  font-size: var(--font-size-lg);
+}
+
+/* ========================================
+   Forms & Inputs
+   ======================================== */
+
+input,
+select {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-medium);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  transition: all 0.2s ease;
+  min-width: 180px;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+input::placeholder {
+  color: var(--text-muted);
+}
+
+input[type="password"] {
+  letter-spacing: 0.1em;
+}
+
+input[type="checkbox"] {
+  min-width: auto;
+  width: 16px;
+  height: 16px;
+  margin-right: var(--space-xs);
+  cursor: pointer;
+}
+
+label {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* ========================================
+   Buttons
+   ======================================== */
+
+button {
+  background: var(--accent-primary);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm) var(--space-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  letter-spacing: 0.01em;
+}
+
+button:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+button.ghost-btn {
+  background: transparent;
+  border: 1px solid var(--border-medium);
+  color: var(--text-secondary);
+}
+
+button.ghost-btn:hover {
+  background: var(--bg-card);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+/* ========================================
+   Advanced Panel
+   ======================================== */
+
+.auth-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+
+.auth-bar .label {
+  margin: 0;
+  margin-right: var(--space-xs);
+  font-size: var(--font-size-sm);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.auth-bar input {
+  flex: 1;
+  min-width: 200px;
+}
+
+/* ========================================
+   Utility Classes
+   ======================================== */
+
+.hidden {
+  display: none !important;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  padding: var(--space-md);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: var(--space-md) 0;
+}
+
+ul {
+  margin: var(--space-md) 0;
+  padding-left: var(--space-lg);
+}
+
+li {
+  margin-bottom: var(--space-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+}
+
+/* ========================================
+   Responsive Design
+   ======================================== */
+
+@media (max-width: 640px) {
+  header h1 {
+    font-size: var(--font-size-md);
+  }
+  
+  nav {
+    width: 100%;
+  }
+  
+  nav a {
+    flex: 1;
+    text-align: center;
+    min-width: calc(50% - var(--space-xs));
+    padding: 10px var(--space-sm);
+  }
+  
+  main {
+    padding: var(--space-md) var(--space-sm);
+  }
+  
+  .card {
+    padding: var(--space-md);
+  }
+  
+  .row {
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-sm);
+  }
+  
+  .value {
+    font-size: var(--font-size-lg);
+  }
+  
+  button {
+    padding: 10px var(--space-md);
+    min-height: 40px;
+  }
+  
+  .auth-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .auth-bar input,
+  .auth-bar button {
+    width: 100%;
+    min-height: 44px;
+  }
+  
+  input,
+  select {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 480px) {
+  :root {
+    --font-size-xs: 10px;
+    --font-size-sm: 12px;
+    --font-size-base: 14px;
+    --font-size-md: 16px;
+    --font-size-lg: 18px;
+    --font-size-xl: 22px;
+  }
+  
+  .row .card {
+    padding: var(--space-sm) var(--space-md);
+  }
+}
+
+/* ========================================
+   Loading States & Animations
+   ======================================== */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.card {
+  animation: fadeIn 0.3s ease;
+}
+
+/* ========================================
+   Status Indicators
+   ======================================== */
+
+#authStatus {
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+}

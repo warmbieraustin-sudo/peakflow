@@ -2,31 +2,39 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PeakFlow Alpha</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="PeakFlow - Training load, recovery, and adaptive planning" />
+    <meta name="theme-color" content="#0a0e1a" />
+    <title>PeakFlow</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <header>
-      <h1>PeakFlow Alpha</h1>
+      <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+        <h1>PeakFlow</h1>
+        <button id="advancedToggleBtn" class="ghost-btn" type="button">Advanced</button>
+      </div>
       <nav>
         <a href="#/">Morning</a>
-        <a href="#/recovery">Recovery + Load</a>
-        <a href="#/workout">Workout Review</a>
+        <a href="#/recovery">Recovery</a>
+        <a href="#/workout">Workout</a>
         <a href="#/plan">Plan</a>
-        <button id="advancedToggleBtn" class="ghost-btn" type="button">Advanced</button>
       </nav>
     </header>
 
     <section id="advancedPanel" class="auth-bar hidden">
-      <label for="tokenInput">Alpha Token</label>
+      <label for="tokenInput" class="label">Alpha Token</label>
       <input id="tokenInput" type="password" placeholder="Optional (if API auth enabled)" />
       <button id="saveTokenBtn">Save</button>
       <button id="clearTokenBtn">Clear</button>
       <span id="authStatus" class="muted">Auth: unknown</span>
     </section>
 
-    <main id="app">Loading…</main>
+    <main id="app">
+      <div class="card">
+        <div class="value">Loading…</div>
+      </div>
+    </main>
 
     <script src="/app.js"></script>
   </body>

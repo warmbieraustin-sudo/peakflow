@@ -144,18 +144,31 @@ function card(label, value) {
 
 function renderMorning(p) {
   const m = p.screens.morning_brief;
+  const freshStatus = m.headline.fresh ? '✅ Fresh' : '⚠️ Stale';
   return `
-    ${card('Freshness', `${m.headline.fresh ? 'Fresh' : 'Stale'} (${m.headline.freshness_age_minutes ?? '—'}m)`)}
-    <div class="row">
-      ${card('Weight (kg)', m.quick_recovery.weight_kg)}
-      ${card('RHR', m.quick_recovery.resting_hr)}
-      ${card('HRV', m.quick_recovery.hrv)}
-      ${card('Sleep Score', m.quick_recovery.sleep_score)}
+    <div class="card">
+      <div class="label">Data Status</div>
+      <div class="value">${freshStatus}</div>
+      <div class="muted">Updated ${m.headline.freshness_age_minutes ?? '—'} minutes ago</div>
     </div>
-    <div class="row">
-      ${card('CTL', m.quick_load.ctl)}
-      ${card('ATL', m.quick_load.atl)}
-      ${card('Daily TL', m.quick_load.daily_training_load)}
+    
+    <div class="card">
+      <div class="label">Recovery Snapshot</div>
+      <div class="row">
+        ${card('Weight (kg)', m.quick_recovery.weight_kg ?? '—')}
+        ${card('Resting HR', m.quick_recovery.resting_hr ?? '—')}
+        ${card('HRV', m.quick_recovery.hrv ?? '—')}
+        ${card('Sleep Score', m.quick_recovery.sleep_score ?? '—')}
+      </div>
+    </div>
+    
+    <div class="card">
+      <div class="label">Training Load</div>
+      <div class="row">
+        ${card('CTL', m.quick_load.ctl ?? '—')}
+        ${card('ATL', m.quick_load.atl ?? '—')}
+        ${card('Daily TL', m.quick_load.daily_training_load ?? '—')}
+      </div>
     </div>
   `;
 }
@@ -200,15 +213,22 @@ function renderRecovery(p, review) {
   return `
     <div class="card">
       <div class="label">Daily Debrief</div>
-      <div class="value" style="font-size:16px; line-height:1.4;">${debrief}</div>
+      <div style="font-size: 16px; line-height: 1.5; color: var(--text-secondary); margin-top: 8px;">${debrief}</div>
     </div>
-    <div class="row">
-      ${card('Sleep Score', rec.sleep_score ?? '—')}
-      ${card('Sleep Hours', sleepHours)}
-      ${card('HRV', rec.hrv ?? '—')}
-      ${card('Resting HR', rec.resting_hr ?? '—')}
-      ${card('Weight (kg)', rec.weight_kg ?? '—')}
+    
+    <div class="card">
+      <div class="label">Recovery Metrics</div>
+      <div class="row">
+        ${card('Sleep Score', rec.sleep_score ?? '—')}
+        ${card('Sleep Hours', sleepHours)}
+        ${card('HRV', rec.hrv ?? '—')}
+        ${card('Resting HR', rec.resting_hr ?? '—')}
+      </div>
+      ${rec.weight_kg ? `<div class="row">
+        ${card('Weight (kg)', rec.weight_kg)}
+      </div>` : ''}
     </div>
+    
     <div class="card">
       <div class="label">Training Load</div>
       <div class="row">
@@ -218,15 +238,16 @@ function renderRecovery(p, review) {
         ${card('Ramp Rate', load.ramp_rate ?? '—')}
       </div>
     </div>
-    <div class="card">
+    
+    ${act.count ? `<div class="card">
       <div class="label">Recent Activity Summary</div>
       <div class="row">
-        ${card('Workouts', act.count ?? 0)}
-        ${card('Total kJ', act.total_kj ?? 0)}
-        ${card('Total Calories', act.total_calories ?? 0)}
+        ${card('Workouts', act.count)}
+        ${card('Total kJ', act.total_kj ?? '—')}
+        ${card('Total Calories', act.total_calories ?? '—')}
         ${card('Avg NP', act.avg_np ?? '—')}
       </div>
-    </div>
+    </div>` : ''}
   `;
 }
 
@@ -241,19 +262,30 @@ function renderWorkout(w) {
 
   const prescStatus = presc.status === 'ok' ? '✅ Available' : '⚠️ Unavailable';
   const execStatus = exec.status === 'ok' ? '✅ Completed' : '⚠️ Not done';
+  
+  const matchIcon = analysis.interval_matching === 'matched' ? '✅' : 
+                     analysis.interval_matching === 'partial' ? '⚠️' : 
+                     analysis.interval_matching === 'mismatch' ? '❌' : '—';
 
   let content = `
     <div class="card">
-      <h2>${w.date}</h2>
+      <div class="label">Workout Date</div>
+      <div class="value" style="margin-bottom: 16px;">${w.date}</div>
+      
       <div class="row">
         ${card('Prescription', prescStatus)}
         ${card('Execution', execStatus)}
       </div>
-      <div class="row">
-        ${card('Match', analysis.interval_matching || '—')}
-        ${card('Score', analysis.score ?? '—')}
-        ${card('Confidence', analysis.confidence || '—')}
-        ${card('Tier', analysis.matching_tier || '—')}
+      
+      <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-subtle);">
+        <div class="row">
+          ${card('Match Quality', `${matchIcon} ${analysis.interval_matching || '—'}`)}
+          ${card('Score', analysis.score ?? '—')}
+        </div>
+        <div class="row">
+          ${card('Confidence', analysis.confidence || '—')}
+          ${card('Tier', analysis.matching_tier || '—')}
+        </div>
       </div>
     </div>
   `;
@@ -261,10 +293,10 @@ function renderWorkout(w) {
   if (presc.status === 'ok') {
     content += `<div class="card">
       <div class="label">Planned Workout</div>
-      <div class="value">${presc.workout_title || '—'}</div>
+      <div class="value" style="margin-bottom: 12px;">${presc.workout_title || '—'}</div>
       <div class="row">
         ${card('Planned TSS', presc.planned_tss ?? '—')}
-        ${card('Planned Duration (s)', presc.planned_duration_sec ?? '—')}
+        ${card('Duration (min)', presc.planned_duration_sec ? Math.round(presc.planned_duration_sec / 60) : '—')}
         ${card('Intervals', presc.intervals?.length ?? 0)}
       </div>
     </div>`;
@@ -274,7 +306,7 @@ function renderWorkout(w) {
     const a = exec.activity;
     content += `<div class="card">
       <div class="label">Executed Workout</div>
-      <div class="value">${a.name || '—'}</div>
+      <div class="value" style="margin-bottom: 12px;">${a.name || '—'}</div>
       <div class="row">
         ${card('Avg Watts', a.avg_watts ?? '—')}
         ${card('Weighted Avg', a.weighted_avg_watts ?? '—')}
@@ -283,27 +315,33 @@ function renderWorkout(w) {
       </div>
       <div class="row">
         ${card('Intensity', a.intensity ?? '—')}
-        ${card('Decoupling %', a.decoupling ?? '—')}
+        ${card('Decoupling %', a.decoupling ? `${a.decoupling}%` : '—')}
       </div>
-    </div>`;
-  }
-
-  if (analysis.reason_codes?.length) {
-    content += `<div class="card">
-      <div class="label">Reason Codes</div>
-      <pre>${analysis.reason_codes.join('\n')}</pre>
     </div>`;
   }
 
   if (analysis.intervals?.length) {
     const intervals = analysis.intervals
-      .map(
-        (i) => `<div style="margin: 4px 0;">${i.label}: ${i.target_low}-${i.target_high} (${i.target_type}) → ${i.executed} ${i.hit ? '✅' : '⚠️'}</div>`
-      )
+      .map((i) => {
+        const icon = i.hit ? '✅' : '⚠️';
+        return `<div style="padding: 8px 0; border-bottom: 1px solid var(--border-subtle); font-size: 14px;">
+          <div style="color: var(--text-primary); margin-bottom: 4px;">${icon} ${i.label}</div>
+          <div style="color: var(--text-muted); font-size: 13px;">
+            Target: ${i.target_low}-${i.target_high} ${i.target_type} → Executed: ${i.executed}
+          </div>
+        </div>`;
+      })
       .join('');
     content += `<div class="card">
       <div class="label">Interval Matching</div>
-      ${intervals}
+      <div style="margin-top: 8px;">${intervals}</div>
+    </div>`;
+  }
+
+  if (analysis.reason_codes?.length) {
+    content += `<div class="card">
+      <div class="label">Analysis Notes</div>
+      <pre style="margin-top: 8px;">${analysis.reason_codes.join('\n')}</pre>
     </div>`;
   }
 
@@ -330,46 +368,80 @@ function renderPlan(modalities, recommendation, horizon) {
 
   return `
     <div class="card">
-      ${advanced ? `<div class="label">Athlete</div>
-      <input id="athleteIdInput" value="${getAthleteId()}" placeholder="athlete id" />
-      <button id="applyAthleteBtn">Load Athlete</button>` : ''}
-      <div class="label" style="margin-top:8px;">Today's Activity</div>
-      <select id="sportSelect">${options}</select>
-      <button id="applySportBtn">Apply</button>
-      <div style="margin-top:8px;">
-        <label class="muted"><input id="coachModeToggle" type="checkbox" ${coachMode ? 'checked' : ''}/> Coach Mode (TP-first)</label>
+      ${advanced ? `<div class="label">Athlete ID</div>
+      <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+        <input id="athleteIdInput" value="${getAthleteId()}" placeholder="athlete id" style="flex: 1;" />
+        <button id="applyAthleteBtn">Load</button>
+      </div>` : ''}
+      
+      <div class="label">Today's Activity</div>
+      <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+        <select id="sportSelect" style="flex: 1;">${options}</select>
+        <button id="applySportBtn">Apply</button>
       </div>
-      <div style="margin-top:8px;">
-        <span class="muted">How did yesterday feel?</span>
-        <button id="fbEasyBtn" ${fb === 'easy' ? 'disabled' : ''}>Too Easy</button>
-        <button id="fbOkBtn" ${fb === 'ok' ? 'disabled' : ''}>About Right</button>
-        <button id="fbHardBtn" ${fb === 'hard' ? 'disabled' : ''}>Too Hard</button>
+      
+      <div style="margin-bottom: 16px;">
+        <label style="display: flex; align-items: center; cursor: pointer;">
+          <input id="coachModeToggle" type="checkbox" ${coachMode ? 'checked' : ''}/>
+          <span class="muted">Coach Mode (TP-first)</span>
+        </label>
       </div>
-      <div class="muted">Mode: ${recommendation.athlete_mode} • Intensity: ${recommendation.intensity_band} • Next: ${recommendation.next_action}</div>
-      <div class="muted">Reason: ${recommendation.modification_reason}</div>
-      ${advanced ? `<div class="muted">Plan Source: ${recommendation.plan_source || 'peakflow'}</div>
-      <div class="muted">Feedback used: ${recommendation.feedback_summary?.used ? 'yes' : 'no'} • athlete: ${recommendation.feedback_summary?.athlete_feedback || '—'} • score: ${recommendation.feedback_summary?.review_score ?? '—'}</div>
-      <div style="margin-top:8px;">
-        <span class="muted">Recommendation relevance:</span>
-        <button id="rel1Btn">1</button><button id="rel2Btn">2</button><button id="rel3Btn">3</button><button id="rel4Btn">4</button><button id="rel5Btn">5</button>
+      
+      <div style="margin-bottom: 12px;">
+        <div class="label" style="margin-bottom: 8px;">How did yesterday feel?</div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+          <button id="fbEasyBtn" ${fb === 'easy' ? 'disabled' : ''} style="flex: 1; min-width: 90px;">Too Easy</button>
+          <button id="fbOkBtn" ${fb === 'ok' ? 'disabled' : ''} style="flex: 1; min-width: 90px;">About Right</button>
+          <button id="fbHardBtn" ${fb === 'hard' ? 'disabled' : ''} style="flex: 1; min-width: 90px;">Too Hard</button>
+        </div>
+      </div>
+      
+      <div style="padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+        <div class="muted" style="margin-bottom: 4px;">Mode: ${recommendation.athlete_mode} • Intensity: ${recommendation.intensity_band}</div>
+        <div class="muted">Next: ${recommendation.next_action}</div>
+        ${recommendation.modification_reason ? `<div class="muted" style="margin-top: 4px;">Reason: ${recommendation.modification_reason}</div>` : ''}
+      </div>
+      
+      ${advanced ? `<div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+        <div class="muted">Plan Source: ${recommendation.plan_source || 'peakflow'}</div>
+        <div class="muted">Feedback used: ${recommendation.feedback_summary?.used ? 'yes' : 'no'} • athlete: ${recommendation.feedback_summary?.athlete_feedback || '—'} • score: ${recommendation.feedback_summary?.review_score ?? '—'}</div>
+        <div style="margin-top: 12px;">
+          <div class="label" style="margin-bottom: 6px;">Recommendation Relevance</div>
+          <div style="display: flex; gap: 6px;">
+            <button id="rel1Btn" style="flex: 1;">1</button>
+            <button id="rel2Btn" style="flex: 1;">2</button>
+            <button id="rel3Btn" style="flex: 1;">3</button>
+            <button id="rel4Btn" style="flex: 1;">4</button>
+            <button id="rel5Btn" style="flex: 1;">5</button>
+          </div>
+        </div>
       </div>` : ''}
     </div>
+    
     <div class="card">
       <div class="label">Recommended Session</div>
-      <div class="value">${recommendation.plan?.title || '—'}</div>
-      ${advanced ? `<div class="muted">sport: ${recommendation.plan?.sport_type || '—'} • schema: ${recommendation.plan?.schema_version || '—'}</div>` : ''}
-      <ul>${blocks}</ul>
+      <div class="value" style="margin-bottom: 12px;">${recommendation.plan?.title || '—'}</div>
+      ${advanced ? `<div class="muted" style="margin-bottom: 8px;">sport: ${recommendation.plan?.sport_type || '—'} • schema: ${recommendation.plan?.schema_version || '—'}</div>` : ''}
+      ${blocks ? `<ul style="margin: 0;">${blocks}</ul>` : '<div class="muted">No interval structure available</div>'}
     </div>
+    
     <div class="card">
-      <div class="label">Why this changed</div>
-      <div class="muted">${recommendation.coach_explanation?.summary || 'Adaptive recommendation based on load, recovery, and feedback.'}</div>
-      <div class="muted">Overlay: ${recommendation.coach_explanation?.recommended_overlay?.next_action || recommendation.next_action || '—'} (${recommendation.coach_explanation?.recommended_overlay?.modification_reason || recommendation.modification_reason || '—'})</div>
+      <div class="label">Why This Changed</div>
+      <div class="muted" style="line-height: 1.6;">${recommendation.coach_explanation?.summary || 'Adaptive recommendation based on load, recovery, and feedback.'}</div>
+      ${advanced && recommendation.coach_explanation?.recommended_overlay ? `<div class="muted" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
+        Overlay: ${recommendation.coach_explanation.recommended_overlay.next_action || recommendation.next_action || '—'} (${recommendation.coach_explanation.recommended_overlay.modification_reason || recommendation.modification_reason || '—'})
+      </div>` : ''}
     </div>
+    
     <div class="card">
       <div class="label">7-Day Firm Horizon</div>
-      <div class="muted">Phase: ${horizon?.periodization?.phase || '—'} • ${horizon?.periodization?.reason || '—'}</div>
-      <div class="muted">Coach Mode: ${horizon?.coach_mode ? 'ON' : 'OFF'}${horizon?.coach_horizon_summary ? ` • TP days: ${horizon.coach_horizon_summary.tp_days_with_plan}/${horizon.coach_horizon_summary.total_days}` : ''}</div>
-      <ul>${weekRows}</ul>
+      <div class="muted" style="margin-bottom: 8px;">
+        Phase: ${horizon?.periodization?.phase || '—'} • ${horizon?.periodization?.reason || '—'}
+      </div>
+      <div class="muted" style="margin-bottom: 12px;">
+        Coach Mode: ${horizon?.coach_mode ? 'ON' : 'OFF'}${horizon?.coach_horizon_summary ? ` • TP days: ${horizon.coach_horizon_summary.tp_days_with_plan}/${horizon.coach_horizon_summary.total_days}` : ''}
+      </div>
+      ${weekRows ? `<ul style="margin: 0;">${weekRows}</ul>` : '<div class="muted">No horizon data available</div>'}
     </div>
   `;
 }
