@@ -148,7 +148,7 @@ def _tp_workout_to_plan(workout: Dict[str, Any], fallback_sport: str) -> Dict[st
         total_hours = workout.get("totalTimePlanned") or 1.0
         blocks = [
             {
-                "label": "coach_prescribed",
+                "label": "Coach Prescribed",
                 "duration_sec": int(float(total_hours) * 3600),
                 "target_type": "rpe",
                 "target_low": 4,
@@ -185,6 +185,71 @@ def _group_tp_by_day(workouts: List[Dict[str, Any]]) -> Dict[str, List[Dict[str,
             continue
         out.setdefault(key, []).append(w)
     return out
+
+
+def _select_primary_tp_workout(workouts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Select the primary/main workout from a day's TP workouts.
+    Filters out warmups and prioritizes actual training sessions.
+    
+    Priority order:
+    1. Bike workouts (workoutTypeValueId == 2)
+    2. Run workouts (workoutTypeValueId == 3)
+    3. Swim workouts (workoutTypeValueId == 4)
+    4. Strength workouts
+    5. Any other workout with planned TSS
+    6. First workout (fallback)
+    """
+    if not workouts:
+        return {}
+    
+    if len(workouts) == 1:
+        return workouts[0]
+    
+    # Filter out Type 100 (general/other) warmups and short activations
+    primary_candidates = []
+    for w in workouts:
+        workout_type = w.get("workoutTypeValueId")
+        title = (w.get("title") or "").lower()
+        total_time = w.get("totalTimePlanned") or 0
+        
+        # Skip short warmups/activations (< 20 min)
+        if total_time and total_time < 1/3:  # Less than 20 minutes (totalTimePlanned is in hours)
+            continue
+        
+        # Skip general warmups
+        if "activation" in title or "pre ride" in title or "pre run" in title:
+            continue
+        
+        # Skip Type 100 (general/other) unless it's the only option
+        if workout_type == 100:
+            continue
+        
+        primary_candidates.append(w)
+    
+    # If we filtered everything out, use original list
+    if not primary_candidates:
+        primary_candidates = workouts
+    
+    # Now prioritize by workout type
+    # Bike (2), Run (3), Swim (4), then Strength, then others
+    for workout_type in [2, 3, 4]:  # Bike, Run, Swim
+        for w in primary_candidates:
+            if w.get("workoutTypeValueId") == workout_type:
+                return w
+    
+    # Strength workouts
+    for w in primary_candidates:
+        if w.get("workoutTypeValueId") == 5:
+            return w
+    
+    # Highest TSS
+    with_tss = [w for w in primary_candidates if w.get("tssPlanned")]
+    if with_tss:
+        return max(with_tss, key=lambda w: w.get("tssPlanned", 0))
+    
+    # Fallback: first in list
+    return primary_candidates[0]
 
 
 def _infer_intensity_from_blocks(blocks: list[Dict[str, Any]]) -> str:
@@ -662,7 +727,8 @@ def build_coach_mode_horizon(
         day = d.get("date")
         workouts = tp_days.get(day) or []
         if workouts:
-            d["plan"] = _tp_workout_to_plan(workouts[0], d.get("sport_type") or selected_sport)
+            primary_workout = _select_primary_tp_workout(workouts)
+            d["plan"] = _tp_workout_to_plan(primary_workout, d.get("sport_type") or selected_sport)
             d["plan_source"] = "trainingpeaks"
             replaced += 1
         else:
