@@ -1074,6 +1074,8 @@ function renderPreferences(prefs = {}) {
   const heightCm = prefs.height_cm || '';
   const weightKg = prefs.weight_kg || '';
   const units = prefs.units || 'imperial';
+  const raceDates = (prefs.race_dates || []).join(', ');
+  const blockWeeks = prefs.block_weeks || 4;
   
   // Convert for display if imperial
   const heightDisplay = units === 'imperial' && heightCm ? (heightCm / 2.54).toFixed(1) : heightCm;
@@ -1157,6 +1159,27 @@ function renderPreferences(prefs = {}) {
             />
           </div>
         </div>
+
+        <label style="display: block; margin-bottom: 8px; font-weight: 600;">Race Dates (optional)</label>
+        <input
+          type="text"
+          id="raceDatesInput"
+          value="${raceDates}"
+          placeholder="YYYY-MM-DD, YYYY-MM-DD"
+          style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); margin-bottom: 8px;"
+        />
+        <div class="muted" style="font-size: 12px; margin-bottom: 16px;">Comma-separated dates. Used for taper/peak planning.</div>
+
+        <label style="display: block; margin-bottom: 8px; font-weight: 600;">Block Periodization Cycle (weeks)</label>
+        <input
+          type="number"
+          id="blockWeeksInput"
+          value="${blockWeeks}"
+          min="3"
+          max="6"
+          step="1"
+          style="width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); margin-bottom: 16px;"
+        />
         
         <button id="savePreferencesBtn" style="width: 100%; padding: 14px; background: var(--accent); color: white; border: none; border-radius: 8px; font-weight: 600; font-size: 16px; cursor: pointer;">
           Save Preferences
@@ -1386,13 +1409,23 @@ function attachPreferencesHandlers() {
       weightKg = units === 'imperial' ? weightValue / 2.20462 : weightValue;
     }
     
+    const raceDatesRaw = (document.getElementById('raceDatesInput')?.value || '').trim();
+    const raceDates = raceDatesRaw
+      ? raceDatesRaw.split(',').map(s => s.trim()).filter(Boolean)
+      : [];
+
+    const blockWeeksVal = parseInt(document.getElementById('blockWeeksInput')?.value || '4', 10);
+    const blockWeeks = Number.isFinite(blockWeeksVal) ? blockWeeksVal : 4;
+
     const prefs = {
       sports,
       weekly_hours: weeklyHours,
       goals,
       height_cm: heightCm,
       weight_kg: weightKg,
-      units
+      units,
+      race_dates: raceDates,
+      block_weeks: blockWeeks,
     };
     
     saveBtn.textContent = 'Saving...';
